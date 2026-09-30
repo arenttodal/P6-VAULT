@@ -297,6 +297,68 @@ try {
     await key(ENTER);
     await find("//div[contains(@class,'toast')][contains(., 'Connect the synth to audition')]");
   });
+  const invoke = (cmd, args) =>
+    execAsync("const done = arguments[arguments.length - 1]; window.__TAURI_INTERNALS__.invoke(arguments[0], arguments[1]).then(done, (e) => done({ ERR: e }));", [cmd, args]);
+  const reconnectSim = async () => {
+    await click("//button[contains(@class,'conn')]");
+    await click(btn("Connect simulator"));
+    await waitFor("s.status && s.status.state === 'Simulator' && !s.dialog", 10000, "sim connected");
+  };
+  const stageSwap = async (a, b, len) => {
+    const st = await state("({ id: s.workspace.id, rev: s.workspace.revision })");
+    const r = await invoke("apply_op", { workspaceId: st.id, revision: st.rev, op: { type: "SwapRanges", a, b, len } });
+    if (r && r.ERR) throw new Error(JSON.stringify(r.ERR));
+    await exec("window.__P6_TEST__.state().refreshWorkspace()");
+    await waitFor(`s.workspace.changed_count === ${2 * len}`, 5000, "staged");
+  };
+
+  await step("drift: synth changed after sync -> reconcile, then write", async () => {
+    await reconnectSim();
+    await stageSwap(20, 300, 3);
+    const r = await invoke("simulator_fault", { fault: { kind: "ExternalChange", slot: 21 } });
+    if (r && r.ERR) throw new Error(JSON.stringify(r.ERR));
+    await click(btn("Review 6 changes"));
+    await find("//h2[contains(., 'The synth changed since Current was captured')]", 60000);
+    await shot("14-drift");
+    await click(btn("Keep New for all"));
+    await click("//div[@role='dialog']//button[contains(., 'Apply')]");
+    await waitFor("!s.dialog && s.workspace.baseline.kind === 'prewrite'", 8000, "rebased");
+    await click(btn("Review 6 changes"));
+    await find("//h2[contains(., 'Write 6 programs')]", 60000);
+    await click("//div[@role='dialog']//button[contains(., 'Write ') and contains(@class,'danger')]");
+    await find("//h2[contains(., 'Bank written and verified')]", 120000);
+    await click(btn("OK"));
+  });
+
+  await step("interrupted write: disconnect mid-way, inspect, continue", async () => {
+    await stageSwap(100, 400, 5);
+    await invoke("simulator_fault", { fault: { kind: "DisconnectAfterWrites", writes: 4 } });
+    await click(btn("Review 10 changes"));
+    await find("//h2[contains(., 'Write 10 programs')]", 60000);
+    await click("//div[@role='dialog']//button[contains(., 'Write ') and contains(@class,'danger')]");
+    await find("//h2[contains(., 'Write stopped')]", 120000);
+    await shot("15-write-stopped");
+    await click(btn("OK"));
+    // Connection is dead: reconnect (new epoch), then recover from History.
+    await invoke("disconnect", {});
+    await reconnectSim();
+    await click("//li[contains(., 'History & backups')]");
+    await click(btn("Recover…"));
+    await click(btn("Inspect interrupted write"));
+    await find("//button[contains(., 'Continue deployment')]", 60000);
+    await shot("16-recovery-report");
+    const rep = await state("s.dialog && s.dialog.report");
+    if (rep.matches_desired !== 4 || rep.matches_before + rep.unknown + rep.conflicts !== 6) throw new Error(JSON.stringify(rep));
+    await click(btn("Continue deployment"));
+    await waitFor("!s.dialog && s.workspace.changed_count === 6", 8000, "6 remaining after continue");
+    await click(btn("Review 6 changes"));
+    await find("//h2[contains(., 'Write 6 programs')]", 60000);
+    await click("//div[@role='dialog']//button[contains(., 'Write ') and contains(@class,'danger')]");
+    await find("//h2[contains(., 'Bank written and verified')]", 120000);
+    await click(btn("OK"));
+    const un = await invoke("app_info", {});
+    if (un.unfinished_sessions.length !== 0) throw new Error("session still unfinished");
+  });
 } catch (e) {
   process.exitCode = 1;
 } finally {

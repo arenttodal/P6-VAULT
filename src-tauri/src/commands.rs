@@ -82,12 +82,15 @@ fn spawn_actor(app: &AppHandle, device: Device) -> Arc<DeviceActor> {
     }))
 }
 
+type SimHandles = Option<(Arc<Mutex<p6_core::simulator::SimState>>, Arc<Mutex<p6_core::simulator::SimControl>>)>;
+
 fn finish_connect(
     app: &AppHandle,
     state: &AppState,
     transport: Box<dyn Transport>,
     kind: TransportKind,
     ports: Option<(String, String)>,
+    sim: SimHandles,
 ) -> ApiResult<ConnectionStatus> {
     if state.busy.lock().unwrap().is_some() {
         return Err(ApiError::new("Busy", "An operation is running."));
@@ -98,7 +101,7 @@ fn finish_connect(
     let probe = dev.probe()?;
     let description = dev.description();
     let actor = spawn_actor(app, dev);
-    *state.conn.lock().unwrap() = Some(Connection { actor, epoch, kind, description, ports, probe, buffer_protected: false });
+    *state.conn.lock().unwrap() = Some(Connection { actor, epoch, kind, description, ports, probe, buffer_protected: false, sim });
     let st = state.status();
     let _ = app.emit("connection", &st);
     Ok(st)
@@ -111,7 +114,7 @@ pub async fn connect(app: AppHandle, state: State<'_, AppState>, input: String, 
     }
     let t = midi::MidirTransport::open(&input, &output, din).map_err(|e| ApiError::new("MidiError", e))?;
     let kind = if din { TransportKind::Din } else { TransportKind::Usb };
-    finish_connect(&app, &state, Box::new(t), kind, Some((input, output)))
+    finish_connect(&app, &state, Box::new(t), kind, Some((input, output)), None)
 }
 
 #[tauri::command]
@@ -121,7 +124,8 @@ pub async fn connect_simulator(app: AppHandle, state: State<'_, AppState>) -> Ap
     }
     let _ = std::fs::create_dir_all(state.sim_dir());
     let sim = SimulatedP6::persistent(state.sim_dir().join("simulated-p6-memory.syx"));
-    finish_connect(&app, &state, Box::new(sim), TransportKind::Simulator, None)
+    let handles = Some((sim.state.clone(), sim.control.clone()));
+    finish_connect(&app, &state, Box::new(sim), TransportKind::Simulator, None, handles)
 }
 
 #[tauri::command]
@@ -836,4 +840,57 @@ pub fn hardware_gate(state: State<AppState>) -> ApiResult<p6_core::storage::jour
 #[tauri::command]
 pub fn backups_dir(state: State<AppState>) -> String {
     state.vault().lock().unwrap().backups_dir().to_string_lossy().into()
+}
+
+// ---------------------------------------------------------------- simulator fault injection
+
+#[derive(Deserialize)]
+#[serde(tag = "kind")]
+pub enum SimFault {
+    /// Someone stores a different program on the synth at this slot (drift).
+    ExternalChange {
+        slot: u16,
+    },
+    /// The connection drops after N further stored writes.
+    DisconnectAfterWrites {
+        writes: u32,
+    },
+    /// The next N replies are lost.
+    DropReplies {
+        count: u32,
+    },
+    Clear,
+}
+
+/// Simulator-only test controls. Unavailable (and meaningless) for real hardware.
+#[tauri::command]
+pub fn simulator_fault(state: State<AppState>, fault: SimFault) -> ApiResult<String> {
+    let c = state.conn.lock().unwrap();
+    let (st, ctl) = c.as_ref().and_then(|c| c.sim.clone()).ok_or_else(|| ApiError::new("Invalid", "Only available while the simulator is connected."))?;
+    drop(c);
+    Ok(match fault {
+        SimFault::ExternalChange { slot } => {
+            if slot >= 500 {
+                return Err(ApiError::new("InvalidDestination", "Slot must be 000-499."));
+            }
+            let n = p6_core::util::now_ms() as u32;
+            st.lock().unwrap().programs[slot as usize] = p6_core::protocol::payload::synthetic_payload(n, &format!("Changed on synth {slot:03}"));
+            format!("Slot {slot:03} was changed on the simulated synth.")
+        }
+        SimFault::DisconnectAfterWrites { writes } => {
+            ctl.lock().unwrap().disconnect_after_stores = Some(writes);
+            format!("The simulated connection will drop after {writes} write(s).")
+        }
+        SimFault::DropReplies { count } => {
+            ctl.lock().unwrap().drop_replies = count;
+            format!("The next {count} replies will be lost.")
+        }
+        SimFault::Clear => {
+            let mut c = ctl.lock().unwrap();
+            c.disconnect_after_stores = None;
+            c.drop_replies = 0;
+            c.disconnect_now = false;
+            "Faults cleared.".into()
+        }
+    })
 }

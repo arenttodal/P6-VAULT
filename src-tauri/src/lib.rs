@@ -93,6 +93,7 @@ pub fn run() {
             commands::set_setting,
             commands::backups_dir,
             commands::hardware_gate,
+            commands::simulator_fault,
         ])
         .build(tauri::generate_context!())
         .expect("error while building P6 Vault")

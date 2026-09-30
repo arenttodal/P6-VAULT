@@ -5,6 +5,21 @@ import { fmtDuration, fmtTime, slot3 } from "../../lib/format";
 import { useApp } from "../../stores/app";
 import { Modal } from "../Modal";
 
+const OBS_LABEL: Record<string, string> = {
+  MatchesDesired: "Written (matches New)",
+  MatchesBefore: "Still the original",
+  Neither: "Other content — preserved",
+  NoReply: "No reply",
+};
+const STEP_LABEL: Record<string, string> = {
+  Planned: "not attempted",
+  SendIntent: "send started",
+  SentUnverified: "sent, unverified",
+  Verified: "verified",
+  Failed: "failed",
+  Uncertain: "uncertain",
+};
+
 const RES_LABEL: Record<string, string> = {
   AdoptHardware: "No staged change — use synth",
   KeepStaged: "Synth unchanged — keep New",
@@ -99,10 +114,10 @@ export function ReconcileDialog({
                 <td>{s.live_name}</td>
                 <td>{s.staged_name ?? <i>empty</i>}</td>
                 <td>
-                  <label>
+                  <label className="toggle">
                     <input type="radio" name={`c${s.slot}`} checked={choices[s.slot] === "KeepNew"} onChange={() => setChoices({ ...choices, [s.slot]: "KeepNew" })} /> Keep New
                   </label>{" "}
-                  <label>
+                  <label className="toggle">
                     <input type="radio" name={`c${s.slot}`} checked={choices[s.slot] === "UseSynth"} onChange={() => setChoices({ ...choices, [s.slot]: "UseSynth" })} /> Use synth
                   </label>
                 </td>
@@ -353,8 +368,8 @@ export function RecoveryDialog({ session, report }: { session: WriteSessionRow; 
                     <td className="mono">{slot3(s.slot)}</td>
                     <td>{s.before_name}</td>
                     <td>→ {s.desired_name}</td>
-                    <td>{s.observation}</td>
-                    <td className="muted">{s.journal_state}</td>
+                    <td>{OBS_LABEL[s.observation] ?? s.observation}</td>
+                    <td className="muted">journal: {STEP_LABEL[s.journal_state] ?? s.journal_state}</td>
                   </tr>
                 ))}
               </tbody>

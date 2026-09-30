@@ -62,6 +62,7 @@ export interface Backend {
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
   backupsDir(): Promise<string>;
+  simulatorFault(fault: { kind: "ExternalChange"; slot: number } | { kind: "DisconnectAfterWrites"; writes: number } | { kind: "DropReplies"; count: number } | { kind: "Clear" }): Promise<string>;
   hardwareGate(): Promise<{ passed: boolean; verified_single_slot_sessions: number; required: number }>;
 
   on<E>(event: string, cb: (payload: E) => void): Promise<() => void>;

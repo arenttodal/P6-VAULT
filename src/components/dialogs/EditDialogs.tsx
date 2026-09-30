@@ -453,6 +453,36 @@ export function HistoryDialog() {
   );
 }
 
+function SimulatorControls() {
+  const { toast, error } = useApp();
+  const [slot, setSlot] = useState(5);
+  const [writes, setWrites] = useState(3);
+  const run = (f: Parameters<ReturnType<typeof api>["simulatorFault"]>[0]) =>
+    void api()
+      .simulatorFault(f)
+      .then((m) => toast("info", m))
+      .catch(error);
+  return (
+    <div className="notice stack">
+      <b>Simulator test controls</b>
+      <span className="small muted">Inject faults into the simulated synth to try drift detection and interrupted-write recovery.</span>
+      <div className="row-buttons">
+        <SlotInput label="Slot" value={slot} onChange={setSlot} />
+        <button onClick={() => run({ kind: "ExternalChange", slot })}>Change this slot on the synth</button>
+      </div>
+      <div className="row-buttons">
+        <label>
+          Writes before disconnect
+          <input className="mono" value={writes} onChange={(e) => setWrites(Number(e.target.value) || 0)} />
+        </label>
+        <button onClick={() => run({ kind: "DisconnectAfterWrites", writes })}>Disconnect during next write</button>
+        <button onClick={() => run({ kind: "DropReplies", count: 3 })}>Lose 3 replies</button>
+        <button onClick={() => run({ kind: "Clear" })}>Clear faults</button>
+      </div>
+    </div>
+  );
+}
+
 export function DiagnosticsDialog() {
   const { closeDialog, status } = useApp();
   const [rows, setRows] = useState<DiagEntry[]>([]);
@@ -468,6 +498,7 @@ export function DiagnosticsDialog() {
       <p className="muted small">
         {status?.description ?? "Not connected"} · local only, no payload bytes are logged.
       </p>
+      {status?.state === "Simulator" && <SimulatorControls />}
       {err && <p className="error">{err}</p>}
       <div className="scroll-box small mono">
         <table className="simple">

@@ -22,6 +22,8 @@ pub struct Connection {
     pub probe: ProbeResult,
     /// The edit buffer has been captured (protected) during this connection.
     pub buffer_protected: bool,
+    /// Fault-injection handles, present only for the simulator.
+    pub sim: Option<(Arc<Mutex<p6_core::simulator::SimState>>, Arc<Mutex<p6_core::simulator::SimControl>>)>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -69,6 +69,7 @@ export const tauriBackend: Backend = {
   setSetting: (key, value) => i("set_setting", { key, value }),
   backupsDir: () => i("backups_dir"),
   hardwareGate: () => i("hardware_gate"),
+  simulatorFault: (fault) => i("simulator_fault", { fault }),
 
   on: async (event, cb) => listen(event, (e) => cb(e.payload as never)),
   pickFiles: async () => {
