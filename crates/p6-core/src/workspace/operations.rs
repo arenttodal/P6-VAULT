@@ -23,7 +23,11 @@ pub type Bank = Vec<Option<Entry>>;
 #[serde(tag = "code")]
 pub enum OpError {
     #[error("{count} programs starting at {start:03} would pass slot 499; the highest valid start is {highest_valid_start:03}")]
-    SelectionOverflow { start: usize, count: usize, highest_valid_start: usize },
+    SelectionOverflow {
+        start: usize,
+        count: usize,
+        highest_valid_start: usize,
+    },
     #[error("invalid destination {0}")]
     InvalidDestination(usize),
     #[error("nothing selected")]
@@ -37,7 +41,11 @@ pub enum OpError {
 }
 
 fn check(bank: &Bank) -> Result<(), OpError> {
-    if bank.len() != BANK_LEN { Err(OpError::BadBankLength(bank.len())) } else { Ok(()) }
+    if bank.len() != BANK_LEN {
+        Err(OpError::BadBankLength(bank.len()))
+    } else {
+        Ok(())
+    }
 }
 
 fn sorted_unique(slots: &[usize]) -> Result<Vec<usize>, OpError> {
@@ -59,10 +67,18 @@ pub fn replace_at(bank: &Bank, start: usize, items: Vec<Entry>) -> Result<Bank, 
         return Err(OpError::EmptySelection);
     }
     if k > BANK_LEN {
-        return Err(OpError::SelectionOverflow { start, count: k, highest_valid_start: 0 });
+        return Err(OpError::SelectionOverflow {
+            start,
+            count: k,
+            highest_valid_start: 0,
+        });
     }
     if start + k > BANK_LEN {
-        return Err(OpError::SelectionOverflow { start, count: k, highest_valid_start: BANK_LEN - k });
+        return Err(OpError::SelectionOverflow {
+            start,
+            count: k,
+            highest_valid_start: BANK_LEN - k,
+        });
     }
     let mut out = bank.clone();
     for (i, e) in items.into_iter().enumerate() {
@@ -76,7 +92,11 @@ fn split_selected(bank: &Bank, sel: &[usize]) -> (Vec<Option<Entry>>, Vec<Option
     let mut selected = Vec::new();
     let mut remaining = Vec::new();
     for (i, c) in bank.iter().enumerate() {
-        if set.contains(&i) { selected.push(c.clone()) } else { remaining.push(c.clone()) }
+        if set.contains(&i) {
+            selected.push(c.clone())
+        } else {
+            remaining.push(c.clone())
+        }
     }
     (selected, remaining)
 }
@@ -86,7 +106,11 @@ pub fn move_to_slot(bank: &Bank, slots: &[usize], target: usize) -> Result<Bank,
     check(bank)?;
     let sel = sorted_unique(slots)?;
     if target + sel.len() > BANK_LEN {
-        return Err(OpError::SelectionOverflow { start: target, count: sel.len(), highest_valid_start: BANK_LEN - sel.len() });
+        return Err(OpError::SelectionOverflow {
+            start: target,
+            count: sel.len(),
+            highest_valid_start: BANK_LEN - sel.len(),
+        });
     }
     let (selected, mut remaining) = split_selected(bank, &sel);
     let tail = remaining.split_off(target);
@@ -115,7 +139,9 @@ pub fn swap_ranges(bank: &Bank, a: usize, b: usize, len: usize) -> Result<Bank, 
     }
     let (lo, hi) = if a < b { (a, b) } else { (b, a) };
     if lo + len > hi {
-        return Err(OpError::InvalidRanges(format!("ranges {a:03}+{len} and {b:03}+{len} overlap")));
+        return Err(OpError::InvalidRanges(format!(
+            "ranges {a:03}+{len} and {b:03}+{len} overlap"
+        )));
     }
     let mut out = bank.clone();
     for i in 0..len {
@@ -125,10 +151,18 @@ pub fn swap_ranges(bank: &Bank, a: usize, b: usize, len: usize) -> Result<Bank, 
 }
 
 /// Stable-sort the entries at `slots` by `key`, putting them back in ascending slot order.
-pub fn sort_selected<K: Ord>(bank: &Bank, slots: &[usize], key: impl Fn(&Option<Entry>) -> K) -> Result<Bank, OpError> {
+pub fn sort_selected<K: Ord>(
+    bank: &Bank,
+    slots: &[usize],
+    key: impl Fn(&Option<Entry>) -> K,
+) -> Result<Bank, OpError> {
     check(bank)?;
     let sel = sorted_unique(slots)?;
-    let mut items: Vec<(usize, Option<Entry>)> = sel.iter().enumerate().map(|(i, s)| (i, bank[*s].clone())).collect();
+    let mut items: Vec<(usize, Option<Entry>)> = sel
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (i, bank[*s].clone()))
+        .collect();
     items.sort_by(|x, y| key(&x.1).cmp(&key(&y.1)).then(x.0.cmp(&y.0)));
     let mut out = bank.clone();
     for (dst, (_, e)) in sel.iter().zip(items) {
@@ -154,7 +188,9 @@ pub fn revert_selected(bank: &Bank, baseline: &Bank, slots: &[usize]) -> Result<
 
 /// Slots whose cell differs between two banks.
 pub fn changed_slots(a: &Bank, b: &Bank) -> Vec<usize> {
-    (0..BANK_LEN.min(a.len()).min(b.len())).filter(|&i| a[i] != b[i]).collect()
+    (0..BANK_LEN.min(a.len()).min(b.len()))
+        .filter(|&i| a[i] != b[i])
+        .collect()
 }
 
 #[cfg(test)]
@@ -162,19 +198,36 @@ mod tests {
     use super::*;
 
     fn e(label: &str) -> Option<Entry> {
-        Some(Entry { entry_id: label.into(), blob_hash: label.into(), occurrence_id: None })
+        Some(Entry {
+            entry_id: label.into(),
+            blob_hash: label.into(),
+            occurrence_id: None,
+        })
     }
     /// 500-slot bank whose first 8 entries are A..H and the rest z###.
     fn bank8() -> Bank {
         (0..BANK_LEN)
-            .map(|i| if i < 8 { e(&((b'A' + i as u8) as char).to_string()) } else { e(&format!("z{i}")) })
+            .map(|i| {
+                if i < 8 {
+                    e(&((b'A' + i as u8) as char).to_string())
+                } else {
+                    e(&format!("z{i}"))
+                }
+            })
             .collect()
     }
     fn head(b: &Bank) -> String {
-        b.iter().take(8).map(|c| c.as_ref().unwrap().entry_id.clone()).collect::<Vec<_>>().join(" ")
+        b.iter()
+            .take(8)
+            .map(|c| c.as_ref().unwrap().entry_id.clone())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
     fn multiset(b: &Bank) -> Vec<String> {
-        let mut v: Vec<String> = b.iter().map(|c| c.as_ref().unwrap().entry_id.clone()).collect();
+        let mut v: Vec<String> = b
+            .iter()
+            .map(|c| c.as_ref().unwrap().entry_id.clone())
+            .collect();
         v.sort();
         v
     }
@@ -185,7 +238,10 @@ mod tests {
     fn move8(sel: &[usize], target: usize) -> String {
         let letters: Vec<String> = "ABCDEFGH".chars().map(|c| c.to_string()).collect();
         let selected: Vec<String> = sel.iter().map(|&i| letters[i].clone()).collect();
-        let remaining: Vec<String> = (0..8).filter(|i| !sel.contains(i)).map(|i| letters[i].clone()).collect();
+        let remaining: Vec<String> = (0..8)
+            .filter(|i| !sel.contains(i))
+            .map(|i| letters[i].clone())
+            .collect();
         let mut r = remaining[..target].to_vec();
         r.extend(selected);
         r.extend(remaining[target..].iter().cloned());
@@ -195,9 +251,18 @@ mod tests {
     #[test]
     fn golden_examples_in_500() {
         let b = bank8();
-        assert_eq!(head(&move_to_slot(&b, &[1, 3], 4).unwrap()), "A C E F B D G H");
-        assert_eq!(head(&move_to_gap(&b, &[1, 3], 6).unwrap()), "A C E F B D G H");
-        assert_eq!(head(&move_to_slot(&b, &[1, 2], 5).unwrap()), "A D E F G B C H");
+        assert_eq!(
+            head(&move_to_slot(&b, &[1, 3], 4).unwrap()),
+            "A C E F B D G H"
+        );
+        assert_eq!(
+            head(&move_to_gap(&b, &[1, 3], 6).unwrap()),
+            "A C E F B D G H"
+        );
+        assert_eq!(
+            head(&move_to_slot(&b, &[1, 2], 5).unwrap()),
+            "A D E F G B C H"
+        );
         assert_eq!(move8(&[1, 3], 4), "A C E F B D G H");
         assert_eq!(move8(&[1, 2], 5), "A D E F G B C H");
     }
@@ -205,7 +270,11 @@ mod tests {
     #[test]
     fn moves_preserve_multiset_and_length() {
         let b = bank8();
-        for (sel, t) in [(vec![0usize, 99, 100, 250, 499], 0usize), (vec![5, 6, 7], 497), (vec![3], 400)] {
+        for (sel, t) in [
+            (vec![0usize, 99, 100, 250, 499], 0usize),
+            (vec![5, 6, 7], 497),
+            (vec![3], 400),
+        ] {
             let r = move_to_slot(&b, &sel, t).unwrap();
             assert_eq!(r.len(), 500);
             assert_eq!(multiset(&r), multiset(&b));
@@ -213,7 +282,13 @@ mod tests {
                 assert_eq!(r[t + i], b[*s]);
             }
         }
-        assert!(matches!(move_to_slot(&b, &[1, 2, 3], 498), Err(OpError::SelectionOverflow { highest_valid_start: 497, .. })));
+        assert!(matches!(
+            move_to_slot(&b, &[1, 2, 3], 498),
+            Err(OpError::SelectionOverflow {
+                highest_valid_start: 497,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -231,7 +306,14 @@ mod tests {
         let items: Vec<Entry> = (0..20).map(|i| e(&format!("n{i}")).unwrap()).collect();
         assert!(replace_at(&b, 480, items.clone()).is_ok());
         let err = replace_at(&b, 481, items).unwrap_err();
-        assert_eq!(err, OpError::SelectionOverflow { start: 481, count: 20, highest_valid_start: 480 });
+        assert_eq!(
+            err,
+            OpError::SelectionOverflow {
+                start: 481,
+                count: 20,
+                highest_valid_start: 480
+            }
+        );
         let r = replace_at(&b, 2, vec![e("X").unwrap()]).unwrap();
         assert_eq!(head(&r), "A B X D E F G H");
     }
@@ -248,7 +330,10 @@ mod tests {
     fn sort_stable_in_place() {
         let b = bank8();
         // sort slots 1,3,5 descending by id: B,D,F -> F,D,B
-        let r = sort_selected(&b, &[1, 3, 5], |c| std::cmp::Reverse(c.as_ref().unwrap().entry_id.clone())).unwrap();
+        let r = sort_selected(&b, &[1, 3, 5], |c| {
+            std::cmp::Reverse(c.as_ref().unwrap().entry_id.clone())
+        })
+        .unwrap();
         assert_eq!(head(&r), "A F C D E B G H");
     }
 

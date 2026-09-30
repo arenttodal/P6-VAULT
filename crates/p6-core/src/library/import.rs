@@ -76,8 +76,15 @@ pub fn preview_import(file_name: &str, bytes: &[u8]) -> Result<ImportPreview, Im
     let mut excluded = Vec::new();
     for (idx, ev) in split_all(bytes, FILE_MAX_FRAME).into_iter().enumerate() {
         match ev {
-            FrameEvent::Frame { bytes: frame, start_offset } => match parse_message(&frame) {
-                Ok(P6Message::ProgramData { address, payload, canonical }) => occurrences.push(ParsedOccurrence {
+            FrameEvent::Frame {
+                bytes: frame,
+                start_offset,
+            } => match parse_message(&frame) {
+                Ok(P6Message::ProgramData {
+                    address,
+                    payload,
+                    canonical,
+                }) => occurrences.push(ParsedOccurrence {
                     message_index: idx,
                     byte_offset: start_offset,
                     kind: OccurrenceKind::Program,
@@ -86,15 +93,17 @@ pub fn preview_import(file_name: &str, bytes: &[u8]) -> Result<ImportPreview, Im
                     frame,
                     noncanonical: !canonical,
                 }),
-                Ok(P6Message::EditBufferData { payload, canonical }) => occurrences.push(ParsedOccurrence {
-                    message_index: idx,
-                    byte_offset: start_offset,
-                    kind: OccurrenceKind::EditBuffer,
-                    address: None,
-                    payload,
-                    frame,
-                    noncanonical: !canonical,
-                }),
+                Ok(P6Message::EditBufferData { payload, canonical }) => {
+                    occurrences.push(ParsedOccurrence {
+                        message_index: idx,
+                        byte_offset: start_offset,
+                        kind: OccurrenceKind::EditBuffer,
+                        address: None,
+                        payload,
+                        frame,
+                        noncanonical: !canonical,
+                    })
+                }
                 Ok(other) => excluded.push(Excluded {
                     message_index: idx,
                     byte_offset: start_offset,
@@ -107,13 +116,26 @@ pub fn preview_import(file_name: &str, bytes: &[u8]) -> Result<ImportPreview, Im
                     reason: "not a Prophet-6 message".into(),
                     kind: ExcludedKind::Unrelated,
                 }),
-                Err(e) => excluded.push(Excluded { message_index: idx, byte_offset: start_offset, reason: e.to_string(), kind: ExcludedKind::Malformed }),
+                Err(e) => excluded.push(Excluded {
+                    message_index: idx,
+                    byte_offset: start_offset,
+                    reason: e.to_string(),
+                    kind: ExcludedKind::Malformed,
+                }),
             },
-            FrameEvent::Malformed { reason, start_offset, .. } => excluded.push(Excluded {
+            FrameEvent::Malformed {
+                reason,
+                start_offset,
+                ..
+            } => excluded.push(Excluded {
                 message_index: idx,
                 byte_offset: start_offset,
                 reason: format!("{reason:?}"),
-                kind: if reason == MalformedReason::Truncated { ExcludedKind::Truncated } else { ExcludedKind::Malformed },
+                kind: if reason == MalformedReason::Truncated {
+                    ExcludedKind::Truncated
+                } else {
+                    ExcludedKind::Malformed
+                },
             }),
         }
     }
@@ -130,7 +152,11 @@ pub fn preview_import(file_name: &str, bytes: &[u8]) -> Result<ImportPreview, Im
     for a in occurrences.iter().filter_map(|o| o.address) {
         *addr_count.entry(a).or_default() += 1;
     }
-    let mut repeated_addresses: Vec<_> = addr_count.into_iter().filter(|(_, n)| *n > 1).map(|(a, _)| a).collect();
+    let mut repeated_addresses: Vec<_> = addr_count
+        .into_iter()
+        .filter(|(_, n)| *n > 1)
+        .map(|(a, _)| a)
+        .collect();
     repeated_addresses.sort();
     Ok(ImportPreview {
         file_name: file_name.to_string(),
@@ -198,6 +224,9 @@ mod tests {
 
     #[test]
     fn empty_file() {
-        assert!(matches!(preview_import("x", &[1, 2, 3]), Err(ImportError::NoPrograms)));
+        assert!(matches!(
+            preview_import("x", &[1, 2, 3]),
+            Err(ImportError::NoPrograms)
+        ));
     }
 }

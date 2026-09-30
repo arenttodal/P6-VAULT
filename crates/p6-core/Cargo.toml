@@ -15,5 +15,6 @@ hex.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 proptest = "1"
 tempfile = "3"

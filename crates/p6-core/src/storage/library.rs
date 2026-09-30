@@ -110,7 +110,11 @@ pub(crate) fn occ_row(r: &rusqlite::Row) -> rusqlite::Result<OccurrenceRow> {
         Some(a) => format!("{source_name} #{a:03}"),
         None => format!("{source_name} (edit buffer #{mi})"),
     };
-    let display_name = label.clone().filter(|s| !s.trim().is_empty()).or_else(|| stored_name.clone()).unwrap_or(fallback);
+    let display_name = label
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| stored_name.clone())
+        .unwrap_or(fallback);
     let auto = auto.unwrap_or_else(|| "Other".into());
     let badges: Option<String> = r.get(18)?;
     Ok(OccurrenceRow {
@@ -134,24 +138,52 @@ pub(crate) fn occ_row(r: &rusqlite::Row) -> rusqlite::Result<OccurrenceRow> {
         dup_exact: r.get(15)?,
         dup_name_only: r.get(16)?,
         params_available: r.get::<_, Option<bool>>(17)?.unwrap_or(false),
-        badges: badges.and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default(),
+        badges: badges
+            .and_then(|b| serde_json::from_str(&b).ok())
+            .unwrap_or_default(),
         noncanonical: r.get(19)?,
     })
 }
 
 impl Vault {
     /// Transactionally commit a previewed import. Retains an unmodified archive copy.
-    pub fn commit_import(&mut self, preview: &ImportPreview, original_path: Option<&str>, raw: &[u8]) -> VResult<ImportSummary> {
+    pub fn commit_import(
+        &mut self,
+        preview: &ImportPreview,
+        original_path: Option<&str>,
+        raw: &[u8],
+    ) -> VResult<ImportSummary> {
         if crate::library::import::file_hash(raw) != preview.file_hash {
-            return Err(VaultError::Invalid("file changed between preview and import".into()));
+            return Err(VaultError::Invalid(
+                "file changed between preview and import".into(),
+            ));
         }
-        let archive = self.archives_dir().join(format!("{}.syx", preview.file_hash));
+        let archive = self
+            .archives_dir()
+            .join(format!("{}.syx", preview.file_hash));
         if !archive.exists() {
-            crate::library::export::write_verified(&archive, raw, &crate::library::export::Expected::Raw).map_err(|e| VaultError::Io(e.to_string()))?;
+            crate::library::export::write_verified(
+                &archive,
+                raw,
+                &crate::library::export::Expected::Raw,
+            )
+            .map_err(|e| VaultError::Io(e.to_string()))?;
         }
-        let previously: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM sources WHERE file_hash=?1)", [&preview.file_hash], |r| r.get(0))?;
+        let previously: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sources WHERE file_hash=?1)",
+            [&preview.file_hash],
+            |r| r.get(0),
+        )?;
         let tx = self.conn.transaction()?;
-        let sid = insert_source(&tx, &preview.file_name, "file", original_path, Some(&archive.to_string_lossy()), Some(&preview.file_hash), None)?;
+        let sid = insert_source(
+            &tx,
+            &preview.file_name,
+            "file",
+            original_path,
+            Some(&archive.to_string_lossy()),
+            Some(&preview.file_hash),
+            None,
+        )?;
         let mut already = 0;
         for o in &preview.occurrences {
             let (hash, new) = insert_blob(&tx, &o.payload)?;
@@ -162,7 +194,17 @@ impl Vault {
                 OccurrenceKind::Program => "program",
                 OccurrenceKind::EditBuffer => "edit_buffer",
             };
-            insert_occurrence(&tx, &sid, &hash, o.message_index, Some(o.byte_offset), kind, o.address.map(|a| a.absolute()), Some(&o.frame), o.noncanonical)?;
+            insert_occurrence(
+                &tx,
+                &sid,
+                &hash,
+                o.message_index,
+                Some(o.byte_offset),
+                kind,
+                o.address.map(|a| a.absolute()),
+                Some(&o.frame),
+                o.noncanonical,
+            )?;
         }
         tx.commit()?;
         Ok(ImportSummary {
@@ -180,7 +222,9 @@ impl Vault {
 
     /// Count of payloads in a preview that already exist in the Vault (from other sources).
     pub fn count_known_payloads(&self, preview: &ImportPreview) -> VResult<usize> {
-        let mut st = self.conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM patch_blobs WHERE hash=?1)")?;
+        let mut st = self
+            .conn
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM patch_blobs WHERE hash=?1)")?;
         let mut n = 0;
         let mut seen = std::collections::HashSet::new();
         for o in &preview.occurrences {
@@ -215,9 +259,13 @@ impl Vault {
     }
 
     pub fn source_archive(&self, source_id: &str) -> VResult<(String, PathBuf)> {
-        let (name, path): (String, Option<String>) =
-            self.conn.query_row("SELECT name, archive_path FROM sources WHERE id=?1", [source_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        let p = path.ok_or_else(|| VaultError::NotFound("this source has no retained archive".into()))?;
+        let (name, path): (String, Option<String>) = self.conn.query_row(
+            "SELECT name, archive_path FROM sources WHERE id=?1",
+            [source_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let p =
+            path.ok_or_else(|| VaultError::NotFound("this source has no retained archive".into()))?;
         Ok((name, PathBuf::from(p)))
     }
 
@@ -232,7 +280,9 @@ impl Vault {
     pub fn occurrences_by_id(&self, ids: &[String]) -> VResult<Vec<OccurrenceRow>> {
         let sql = format!("{OCC_SELECT} WHERE o.id = ?1");
         let mut st = self.conn.prepare_cached(&sql)?;
-        ids.iter().map(|id| st.query_row([id], occ_row).map_err(VaultError::from)).collect()
+        ids.iter()
+            .map(|id| st.query_row([id], occ_row).map_err(VaultError::from))
+            .collect()
     }
 
     pub fn classification_detail(&self, blob_hash: &str) -> VResult<ClassificationDetail> {
@@ -256,11 +306,25 @@ impl Vault {
         ids.iter()
             .map(|id| {
                 let a = st
-                    .query_row([id], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)? != 0)))
+                    .query_row([id], |r| {
+                        Ok((
+                            r.get::<_, Option<String>>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, i64>(2)? != 0,
+                        ))
+                    })
                     .optional()?;
                 Ok(match a {
-                    Some((l, c, f)) => Annotation { occurrence_id: id.clone(), vault_label: l, manual_category: c, favorite: f },
-                    None => Annotation { occurrence_id: id.clone(), ..Default::default() },
+                    Some((l, c, f)) => Annotation {
+                        occurrence_id: id.clone(),
+                        vault_label: l,
+                        manual_category: c,
+                        favorite: f,
+                    },
+                    None => Annotation {
+                        occurrence_id: id.clone(),
+                        ..Default::default()
+                    },
                 })
             })
             .collect()
@@ -286,14 +350,33 @@ impl Vault {
     pub fn protect_edit_buffer(&mut self, p: &Payload, device: &str) -> VResult<ProtectedBuffer> {
         let tx = self.conn.transaction()?;
         let (hash, _) = insert_blob(&tx, p)?;
-        let name = format!("Protected edit buffer {}", crate::util::file_timestamp(now_ms()));
-        let sid = insert_source(&tx, &name, "edit_buffer_capture", None, None, None, Some(device))?;
+        let name = format!(
+            "Protected edit buffer {}",
+            crate::util::file_timestamp(now_ms())
+        );
+        let sid = insert_source(
+            &tx,
+            &name,
+            "edit_buffer_capture",
+            None,
+            None,
+            None,
+            Some(device),
+        )?;
         let occ = insert_occurrence(&tx, &sid, &hash, 0, None, "edit_buffer", None, None, false)?;
         let id = new_id();
         let now = now_ms();
         tx.execute("INSERT INTO protected_buffers(id,blob_hash,occurrence_id,device,captured_ms) VALUES(?1,?2,?3,?4,?5)", params![id, hash, occ, device, now])?;
         tx.commit()?;
-        Ok(ProtectedBuffer { id, blob_hash: hash, occurrence_id: Some(occ), name: p.display_name().unwrap_or(name), device: Some(device.into()), captured_ms: now, restored_ms: None })
+        Ok(ProtectedBuffer {
+            id,
+            blob_hash: hash,
+            occurrence_id: Some(occ),
+            name: p.display_name().unwrap_or(name),
+            device: Some(device.into()),
+            captured_ms: now,
+            restored_ms: None,
+        })
     }
 
     pub fn protected_buffers(&self) -> VResult<Vec<ProtectedBuffer>> {
@@ -306,7 +389,9 @@ impl Vault {
                     id: r.get(0)?,
                     blob_hash: r.get(1)?,
                     occurrence_id: r.get(2)?,
-                    name: r.get::<_, Option<String>>(3)?.unwrap_or_else(|| "(unnamed)".into()),
+                    name: r
+                        .get::<_, Option<String>>(3)?
+                        .unwrap_or_else(|| "(unnamed)".into()),
                     device: r.get(4)?,
                     captured_ms: r.get(5)?,
                     restored_ms: r.get(6)?,
@@ -317,14 +402,19 @@ impl Vault {
     }
 
     pub fn mark_buffer_restored(&self, id: &str) -> VResult<()> {
-        self.conn.execute("UPDATE protected_buffers SET restored_ms=?2 WHERE id=?1", params![id, now_ms()])?;
+        self.conn.execute(
+            "UPDATE protected_buffers SET restored_ms=?2 WHERE id=?1",
+            params![id, now_ms()],
+        )?;
         Ok(())
     }
 
     /// Payloads of a source as (occurrence id, address, payload), for bank construction.
     pub fn source_programs(&self, source_id: &str) -> VResult<Vec<(String, Option<u16>, String)>> {
         let mut st = self.conn.prepare("SELECT id, orig_address, blob_hash FROM source_occurrences WHERE source_id=?1 ORDER BY message_index")?;
-        let rows = st.query_map([source_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+        let rows = st
+            .query_map([source_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?;
         Ok(rows)
     }
 }
@@ -342,7 +432,10 @@ mod tests {
         let (_d, mut v) = vault();
         let mut data = Vec::new();
         for i in 0..3u16 {
-            data.extend(program_file_frame(StoredAddress::from_absolute(i).unwrap(), &synthetic_payload(i as u32, &format!("Bass {i}"))));
+            data.extend(program_file_frame(
+                StoredAddress::from_absolute(i).unwrap(),
+                &synthetic_payload(i as u32, &format!("Bass {i}")),
+            ));
         }
         let p = preview_import("a.syx", &data).unwrap();
         let s1 = v.commit_import(&p, Some("/x/a.syx"), &data).unwrap();
@@ -363,9 +456,15 @@ mod tests {
     #[test]
     fn blobs_immutable() {
         let (_d, mut v) = vault();
-        let data = program_file_frame(StoredAddress::from_absolute(0).unwrap(), &synthetic_payload(1, "x"));
+        let data = program_file_frame(
+            StoredAddress::from_absolute(0).unwrap(),
+            &synthetic_payload(1, "x"),
+        );
         let p = preview_import("a.syx", &data).unwrap();
         v.commit_import(&p, None, &data).unwrap();
-        assert!(v.conn.execute("UPDATE patch_blobs SET payload=zeroblob(1024)", []).is_err());
+        assert!(v
+            .conn
+            .execute("UPDATE patch_blobs SET payload=zeroblob(1024)", [])
+            .is_err());
     }
 }

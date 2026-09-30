@@ -18,7 +18,10 @@ impl StoredAddress {
         self.bank as u16 * 100 + self.program as u16
     }
     pub fn from_absolute(n: u16) -> Option<Self> {
-        (n < 1000).then(|| Self { bank: (n / 100) as u8, program: (n % 100) as u8 })
+        (n < 1000).then_some(Self {
+            bank: (n / 100) as u8,
+            program: (n % 100) as u8,
+        })
     }
     pub fn user_slot(self) -> Option<UserSlot> {
         UserSlot::new(self.absolute())
@@ -47,7 +50,10 @@ impl UserSlot {
         self.0
     }
     pub fn address(self) -> StoredAddress {
-        StoredAddress { bank: (self.0 / 100) as u8, program: (self.0 % 100) as u8 }
+        StoredAddress {
+            bank: (self.0 / 100) as u8,
+            program: (self.0 % 100) as u8,
+        }
     }
     pub fn all() -> impl Iterator<Item = UserSlot> {
         (0..500).map(UserSlot)
@@ -78,7 +84,13 @@ mod tests {
     fn ranges() {
         assert!(UserSlot::new(499).is_some());
         assert!(UserSlot::new(500).is_none());
-        assert_eq!(UserSlot::new(123).unwrap().address(), StoredAddress { bank: 1, program: 23 });
+        assert_eq!(
+            UserSlot::new(123).unwrap().address(),
+            StoredAddress {
+                bank: 1,
+                program: 23
+            }
+        );
         assert!(StoredAddress::new(10, 0).is_none());
         assert!(StoredAddress::new(5, 0).unwrap().user_slot().is_none());
         assert_eq!(StoredAddress::new(9, 99).unwrap().to_string(), "999");

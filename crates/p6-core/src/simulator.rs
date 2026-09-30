@@ -24,6 +24,8 @@ pub struct SimControl {
     pub fragment_replies: bool,
     pub corrupt_store_slots: HashSet<u16>,
     pub ignore_store_slots: HashSet<u16>,
+    /// Ignore the next N stored writes (write does not land), then behave normally.
+    pub ignore_next_stores: u32,
     /// Disconnect after this many further stored writes are processed.
     pub disconnect_after_stores: Option<u32>,
     pub disconnect_now: bool,
@@ -49,16 +51,30 @@ pub struct SimulatedP6 {
 
 pub fn factory_like_bank() -> Vec<Payload> {
     const NAMES: &[&str] = &[
-        "Sim Bass", "Sim Lead", "Sim Pad", "Sim Keys", "Sim Pluck", "Sim Arp", "Sim Texture", "Sim Brass", "Sim Strings", "Sim Sub Bass",
+        "Sim Bass",
+        "Sim Lead",
+        "Sim Pad",
+        "Sim Keys",
+        "Sim Pluck",
+        "Sim Arp",
+        "Sim Texture",
+        "Sim Brass",
+        "Sim Strings",
+        "Sim Sub Bass",
     ];
-    (0..1000u32).map(|i| synthetic_payload(i + 1, &format!("{} {:03}", NAMES[(i % 10) as usize], i))).collect()
+    (0..1000u32)
+        .map(|i| synthetic_payload(i + 1, &format!("{} {:03}", NAMES[(i % 10) as usize], i)))
+        .collect()
 }
 
 impl SimulatedP6 {
     pub fn new() -> Self {
         let programs = factory_like_bank();
         let edit_buffer = programs[0].clone();
-        Self::with_state(SimState { programs, edit_buffer })
+        Self::with_state(SimState {
+            programs,
+            edit_buffer,
+        })
     }
 
     pub fn with_state(state: SimState) -> Self {
@@ -71,6 +87,19 @@ impl SimulatedP6 {
             persist: None,
             rng: 0x9E3779B97F4A7C15,
         }
+    }
+
+    /// A second transport onto the same simulated synth (models a reconnect).
+    pub fn reconnect(&self) -> Self {
+        let mut s = Self::with_state(SimState {
+            programs: vec![],
+            edit_buffer: self.state.lock().unwrap().edit_buffer.clone(),
+        });
+        s.state = self.state.clone();
+        s.control = self.control.clone();
+        s.control.lock().unwrap().disconnect_now = false;
+        s.persist = self.persist.clone();
+        s
     }
 
     /// Load simulator memory from a separate path (never the real Vault database).
@@ -95,7 +124,11 @@ impl SimulatedP6 {
             let st = self.state.lock().unwrap();
             let bank: Vec<Option<Payload>> = st.programs[..500].iter().cloned().map(Some).collect();
             if let Ok(bytes) = crate::library::export::bank_bytes(&bank) {
-                let _ = crate::library::export::write_verified(p, &bytes, &crate::library::export::Expected::Raw);
+                let _ = crate::library::export::write_verified(
+                    p,
+                    &bytes,
+                    &crate::library::export::Expected::Raw,
+                );
             }
         }
     }
@@ -161,7 +194,9 @@ impl SimulatedP6 {
             self.inbox.push_back(RecvEvent::Frame(h));
         }
         if frame.len() == 6 && frame[1] == 0x7E && frame[3] == 0x06 && frame[4] == 0x01 {
-            self.reply(vec![0xF0, 0x7E, 0x00, 0x06, 0x02, 0x01, 0x2D, 0x01, 0x00, 0x00, 0x01, 0x05, 0x00, 0xF7]);
+            self.reply(vec![
+                0xF0, 0x7E, 0x00, 0x06, 0x02, 0x01, 0x2D, 0x01, 0x00, 0x00, 0x01, 0x05, 0x00, 0xF7,
+            ]);
             return;
         }
         match parse_message(frame) {
@@ -177,16 +212,23 @@ impl SimulatedP6 {
                 self.state.lock().unwrap().edit_buffer = payload;
                 self.control.lock().unwrap().edit_buffer_loads += 1;
             }
-            Ok(P6Message::ProgramData { address, payload, .. }) => {
+            Ok(P6Message::ProgramData {
+                address, payload, ..
+            }) => {
                 let slot = address.absolute();
                 let mut c = self.control.lock().unwrap();
                 c.stores.push(slot);
-                if let Some(n) = c.disconnect_after_stores.as_mut() {
-                    if *n == 0 {
+                if let Some(n) = c.disconnect_after_stores {
+                    if n == 0 {
+                        c.disconnect_after_stores = None;
                         c.disconnect_now = true;
                         return;
                     }
-                    *n -= 1;
+                    c.disconnect_after_stores = Some(n - 1);
+                }
+                if c.ignore_next_stores > 0 {
+                    c.ignore_next_stores -= 1;
+                    return;
                 }
                 if c.ignore_store_slots.contains(&slot) || slot >= 500 {
                     return;
@@ -315,7 +357,10 @@ mod tests {
         let sim = SimulatedP6::new();
         sim.control.lock().unwrap().drop_replies = 10;
         let mut d = dev(sim);
-        assert_eq!(d.read_program(addr(1), None), Err(DeviceError::DeviceUnresponsive { attempts: 3 }));
+        assert_eq!(
+            d.read_program(addr(1), None),
+            Err(DeviceError::DeviceUnresponsive { attempts: 3 })
+        );
     }
 
     #[test]
@@ -329,7 +374,10 @@ mod tests {
         assert_eq!(st.lock().unwrap().edit_buffer, p);
         let c = ctl.lock().unwrap();
         assert!(c.stores.is_empty());
-        assert!(c.sent.iter().all(|f| !crate::protocol::messages::is_stored_write(f)));
+        assert!(c
+            .sent
+            .iter()
+            .all(|f| !crate::protocol::messages::is_stored_write(f)));
     }
 
     #[test]
@@ -337,6 +385,9 @@ mod tests {
         let sim = SimulatedP6::new();
         sim.control.lock().unwrap().disconnect_now = true;
         let mut d = dev(sim);
-        assert_eq!(d.read_program(addr(1), None), Err(DeviceError::Disconnected));
+        assert_eq!(
+            d.read_program(addr(1), None),
+            Err(DeviceError::Disconnected)
+        );
     }
 }

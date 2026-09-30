@@ -75,7 +75,14 @@ const DIAG_MAX: usize = 2000;
 
 impl Device {
     pub fn new(transport: Box<dyn Transport>, profile: TransportProfile, epoch: u64) -> Self {
-        Self { transport, profile, epoch, diag: VecDeque::new(), quarantined: 0, held_notes: Vec::new() }
+        Self {
+            transport,
+            profile,
+            epoch,
+            diag: VecDeque::new(),
+            quarantined: 0,
+            held_notes: Vec::new(),
+        }
     }
     pub fn epoch(&self) -> u64 {
         self.epoch
@@ -90,7 +97,15 @@ impl Device {
         self.diag.iter().cloned().collect()
     }
 
-    fn log(&mut self, direction: &'static str, summary: String, bytes: usize, attempt: u32, started: Instant, result: &str) {
+    fn log(
+        &mut self,
+        direction: &'static str,
+        summary: String,
+        bytes: usize,
+        attempt: u32,
+        started: Instant,
+        result: &str,
+    ) {
         if self.diag.len() >= DIAG_MAX {
             self.diag.pop_front();
         }
@@ -106,13 +121,27 @@ impl Device {
     }
 
     /// The single choke point for outgoing bytes. Refuses command 02 unless `store_ok`.
-    fn send_frame(&mut self, frame: &[u8], store_ok: bool, summary: String) -> Result<(), DeviceError> {
+    fn send_frame(
+        &mut self,
+        frame: &[u8],
+        store_ok: bool,
+        summary: String,
+    ) -> Result<(), DeviceError> {
         if is_stored_write(frame) && !store_ok {
-            return Err(DeviceError::Refused("stored-program writes are only allowed through the write engine".into()));
+            return Err(DeviceError::Refused(
+                "stored-program writes are only allowed through the write engine".into(),
+            ));
         }
         let t = Instant::now();
         let r = self.transport.send(frame);
-        self.log("out", summary, frame.len(), 1, t, if r.is_ok() { "sent" } else { "error" });
+        self.log(
+            "out",
+            summary,
+            frame.len(),
+            1,
+            t,
+            if r.is_ok() { "sent" } else { "error" },
+        );
         r?;
         std::thread::sleep(self.profile.wire_time(frame.len()));
         Ok(())
@@ -122,17 +151,32 @@ impl Device {
     pub fn drain(&mut self, settle: Duration) -> Result<usize, DeviceError> {
         let mut n = 0;
         let end = Instant::now() + settle;
-        while let Some(_) = self.transport.recv(end.saturating_duration_since(Instant::now()))? {
+        while self
+            .transport
+            .recv(end.saturating_duration_since(Instant::now()))?
+            .is_some()
+        {
             n += 1;
         }
         if n > 0 {
             self.quarantined += n as u64;
-            self.log("in", format!("quarantined {n} stale frame(s)"), 0, 0, Instant::now(), "drained");
+            self.log(
+                "in",
+                format!("quarantined {n} stale frame(s)"),
+                0,
+                0,
+                Instant::now(),
+                "drained",
+            );
         }
         Ok(n)
     }
 
-    fn wait_for<T>(&mut self, deadline: Instant, mut want: impl FnMut(&P6Message) -> Option<T>) -> Result<Option<T>, DeviceError> {
+    fn wait_for<T>(
+        &mut self,
+        deadline: Instant,
+        mut want: impl FnMut(&P6Message) -> Option<T>,
+    ) -> Result<Option<T>, DeviceError> {
         loop {
             let now = Instant::now();
             if now >= deadline {
@@ -162,17 +206,35 @@ impl Device {
     pub fn probe(&mut self) -> Result<ProbeResult, DeviceError> {
         self.drain(Duration::from_millis(20))?;
         let t = Instant::now();
-        self.send_frame(&messages::identity_inquiry(), false, "identity inquiry".into())?;
-        let deadline = Instant::now() + Duration::from_millis(self.profile.read_timeout_ms.min(1500));
+        self.send_frame(
+            &messages::identity_inquiry(),
+            false,
+            "identity inquiry".into(),
+        )?;
+        let deadline =
+            Instant::now() + Duration::from_millis(self.profile.read_timeout_ms.min(1500));
         let ident = self.wait_for(deadline, |m| match m {
-            P6Message::IdentityReply { family, version, .. } => Some((family.clone(), version.clone())),
+            P6Message::IdentityReply {
+                family, version, ..
+            } => Some((family.clone(), version.clone())),
             _ => None,
         })?;
-        self.log("in", "identity reply".into(), 0, 1, t, if ident.is_some() { "ok" } else { "no reply" });
+        self.log(
+            "in",
+            "identity reply".into(),
+            0,
+            1,
+            t,
+            if ident.is_some() { "ok" } else { "no reply" },
+        );
         self.inter_request();
-        let prog_ok = self.read_program(StoredAddress::new(0, 0).unwrap(), None).is_ok();
+        let prog_ok = self
+            .read_program(StoredAddress::new(0, 0).unwrap(), None)
+            .is_ok();
         if ident.is_none() && !prog_ok {
-            return Err(DeviceError::NotAProphet6("no identity reply and no valid program dump".into()));
+            return Err(DeviceError::NotAProphet6(
+                "no identity reply and no valid program dump".into(),
+            ));
         }
         Ok(ProbeResult {
             identity_family: ident.as_ref().map(|i| i.0.clone()),
@@ -185,7 +247,11 @@ impl Device {
     /// Read one stored program with bounded retries. Only a ProgramData reply for
     /// exactly this address is accepted. Cancellation never interrupts an in-flight
     /// request; it only prevents further retries.
-    pub fn read_program(&mut self, addr: StoredAddress, cancel: Option<&AtomicBool>) -> Result<Payload, DeviceError> {
+    pub fn read_program(
+        &mut self,
+        addr: StoredAddress,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Payload, DeviceError> {
         let attempts = 1 + self.profile.read_retries;
         for attempt in 1..=attempts {
             if attempt > 1 {
@@ -193,16 +259,31 @@ impl Device {
                     return Err(DeviceError::Cancelled);
                 }
                 // Drain late replies to the timed-out request before retrying.
-                self.drain(Duration::from_millis(self.profile.inter_request_ms.max(50) * 2))?;
+                self.drain(Duration::from_millis(
+                    self.profile.inter_request_ms.max(50) * 2,
+                ))?;
             }
             let t = Instant::now();
-            self.send_frame(&messages::request_program(addr), false, format!("request program {addr}"))?;
+            self.send_frame(
+                &messages::request_program(addr),
+                false,
+                format!("request program {addr}"),
+            )?;
             let deadline = Instant::now() + Duration::from_millis(self.profile.read_timeout_ms);
             let got = self.wait_for(deadline, |m| match m {
-                P6Message::ProgramData { address, payload, .. } if *address == addr => Some(payload.clone()),
+                P6Message::ProgramData {
+                    address, payload, ..
+                } if *address == addr => Some(payload.clone()),
                 _ => None,
             })?;
-            self.log("in", format!("program {addr}"), 1178, attempt, t, if got.is_some() { "ok" } else { "timeout" });
+            self.log(
+                "in",
+                format!("program {addr}"),
+                1178,
+                attempt,
+                t,
+                if got.is_some() { "ok" } else { "timeout" },
+            );
             if let Some(p) = got {
                 return Ok(p);
             }
@@ -217,13 +298,24 @@ impl Device {
                 self.drain(Duration::from_millis(100))?;
             }
             let t = Instant::now();
-            self.send_frame(&messages::request_edit_buffer(), false, "request edit buffer".into())?;
+            self.send_frame(
+                &messages::request_edit_buffer(),
+                false,
+                "request edit buffer".into(),
+            )?;
             let deadline = Instant::now() + Duration::from_millis(self.profile.read_timeout_ms);
             let got = self.wait_for(deadline, |m| match m {
                 P6Message::EditBufferData { payload, .. } => Some(payload.clone()),
                 _ => None,
             })?;
-            self.log("in", "edit buffer".into(), 1176, attempt, t, if got.is_some() { "ok" } else { "timeout" });
+            self.log(
+                "in",
+                "edit buffer".into(),
+                1176,
+                attempt,
+                t,
+                if got.is_some() { "ok" } else { "timeout" },
+            );
             if let Some(p) = got {
                 return Ok(p);
             }
@@ -234,13 +326,25 @@ impl Device {
     /// Audition: load a payload into the edit buffer (command 03). Never stores.
     pub fn load_edit_buffer(&mut self, p: &Payload) -> Result<(), DeviceError> {
         self.release_notes()?;
-        self.send_frame(&messages::edit_buffer_frame(p), false, format!("edit buffer load '{}'", p.display_name().unwrap_or_default()))?;
+        self.send_frame(
+            &messages::edit_buffer_frame(p),
+            false,
+            format!(
+                "edit buffer load '{}'",
+                p.display_name().unwrap_or_default()
+            ),
+        )?;
         std::thread::sleep(Duration::from_millis(self.profile.inter_request_ms));
         Ok(())
     }
 
     /// Crate-private stored write. Only `deployment::writer` holds the permit type needed to call it.
-    pub(crate) fn transmit_stored_program(&mut self, _permit: &crate::deployment::permit::ConfirmedWritePermit, slot: UserSlot, p: &Payload) -> Result<(), DeviceError> {
+    pub(crate) fn transmit_stored_program(
+        &mut self,
+        _permit: &crate::deployment::permit::ConfirmedWritePermit,
+        slot: UserSlot,
+        p: &Payload,
+    ) -> Result<(), DeviceError> {
         self.release_notes()?;
         let frame = messages::stored_write_frame(slot, p);
         self.send_frame(&frame, true, format!("STORE program {slot}"))?;
@@ -250,7 +354,8 @@ impl Device {
 
     pub fn note_on(&mut self, channel: u8, note: u8, velocity: u8) -> Result<(), DeviceError> {
         let ch = channel.clamp(1, 16) - 1;
-        self.transport.send(&[0x90 | ch, note & 0x7F, velocity & 0x7F])?;
+        self.transport
+            .send(&[0x90 | ch, note & 0x7F, velocity & 0x7F])?;
         self.held_notes.push((ch, note));
         Ok(())
     }

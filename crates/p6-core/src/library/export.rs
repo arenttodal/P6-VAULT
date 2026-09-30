@@ -28,7 +28,10 @@ pub fn bank_bytes(bank: &[Option<Payload>]) -> Result<Vec<u8>, ExportError> {
     }
     let mut out = Vec::with_capacity(500 * 1178);
     for (i, p) in bank.iter().enumerate() {
-        out.extend(program_file_frame(UserSlot::new(i as u16).unwrap().address(), p.as_ref().unwrap()));
+        out.extend(program_file_frame(
+            UserSlot::new(i as u16).unwrap().address(),
+            p.as_ref().unwrap(),
+        ));
     }
     Ok(out)
 }
@@ -61,24 +64,40 @@ pub fn verify_bytes(bytes: &[u8], expected: &Expected) -> Result<(), ExportError
     let parsed: Vec<P6Message> = split_all(bytes, FILE_MAX_FRAME)
         .into_iter()
         .map(|e| match e {
-            FrameEvent::Frame { bytes, .. } => parse_message(&bytes).map_err(|e| ExportError::Verification(e.to_string())),
-            FrameEvent::Malformed { reason, .. } => Err(ExportError::Verification(format!("{reason:?}"))),
+            FrameEvent::Frame { bytes, .. } => {
+                parse_message(&bytes).map_err(|e| ExportError::Verification(e.to_string()))
+            }
+            FrameEvent::Malformed { reason, .. } => {
+                Err(ExportError::Verification(format!("{reason:?}")))
+            }
         })
         .collect::<Result<_, _>>()?;
     match expected {
         Expected::Raw => Ok(()),
         Expected::EditBuffer(p) => match parsed.as_slice() {
             [P6Message::EditBufferData { payload, .. }] if payload == p => Ok(()),
-            _ => Err(ExportError::Verification("edit buffer did not re-parse identically".into())),
+            _ => Err(ExportError::Verification(
+                "edit buffer did not re-parse identically".into(),
+            )),
         },
         Expected::Programs(list) => {
             if parsed.len() != list.len() {
-                return Err(ExportError::Verification(format!("{} messages, expected {}", parsed.len(), list.len())));
+                return Err(ExportError::Verification(format!(
+                    "{} messages, expected {}",
+                    parsed.len(),
+                    list.len()
+                )));
             }
             for (m, (a, p)) in parsed.iter().zip(list) {
                 match m {
-                    P6Message::ProgramData { address, payload, .. } if address == a && payload == p => {}
-                    _ => return Err(ExportError::Verification(format!("slot {a} did not re-parse identically"))),
+                    P6Message::ProgramData {
+                        address, payload, ..
+                    } if address == a && payload == p => {}
+                    _ => {
+                        return Err(ExportError::Verification(format!(
+                            "slot {a} did not re-parse identically"
+                        )))
+                    }
                 }
             }
             Ok(())
@@ -89,7 +108,12 @@ pub fn verify_bytes(bytes: &[u8], expected: &Expected) -> Result<(), ExportError
 /// Write to a temp file, fsync, atomically rename, then re-read and verify.
 pub fn write_verified(path: &Path, bytes: &[u8], expected: &Expected) -> Result<(), ExportError> {
     let dir = path.parent().unwrap_or(Path::new("."));
-    let tmp = dir.join(format!(".{}.p6vault-tmp", path.file_name().and_then(|s| s.to_str()).unwrap_or("export")));
+    let tmp = dir.join(format!(
+        ".{}.p6vault-tmp",
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export")
+    ));
     {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -101,14 +125,24 @@ pub fn write_verified(path: &Path, bytes: &[u8], expected: &Expected) -> Result<
     }
     let back = std::fs::read(path)?;
     if back != bytes {
-        return Err(ExportError::Verification("file contents differ after write".into()));
+        return Err(ExportError::Verification(
+            "file contents differ after write".into(),
+        ));
     }
     verify_bytes(&back, expected)
 }
 
 pub fn bank_expected(bank: &[Option<Payload>]) -> Expected {
     Expected::Programs(
-        bank.iter().enumerate().map(|(i, p)| (UserSlot::new(i as u16).unwrap().address(), p.clone().unwrap())).collect(),
+        bank.iter()
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    UserSlot::new(i as u16).unwrap().address(),
+                    p.clone().unwrap(),
+                )
+            })
+            .collect(),
     )
 }
 
@@ -119,20 +153,31 @@ mod tests {
 
     #[test]
     fn full_bank_589000() {
-        let bank: Vec<Option<Payload>> = (0..500).map(|i| Some(synthetic_payload(i, &format!("P{i}")))).collect();
+        let bank: Vec<Option<Payload>> = (0..500)
+            .map(|i| Some(synthetic_payload(i, &format!("P{i}"))))
+            .collect();
         let bytes = bank_bytes(&bank).unwrap();
         assert_eq!(bytes.len(), 589000);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bank.syx");
         write_verified(&path, &bytes, &bank_expected(&bank)).unwrap();
-        let prev = crate::library::import::preview_import("bank.syx", &std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(prev.complete_user_bank().unwrap(), bank.into_iter().map(Option::unwrap).collect::<Vec<_>>());
+        let prev =
+            crate::library::import::preview_import("bank.syx", &std::fs::read(&path).unwrap())
+                .unwrap();
+        assert_eq!(
+            prev.complete_user_bank().unwrap(),
+            bank.into_iter().map(Option::unwrap).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn rejects_empty_slots() {
-        let mut bank: Vec<Option<Payload>> = (0..500).map(|i| Some(synthetic_payload(i, "x"))).collect();
+        let mut bank: Vec<Option<Payload>> =
+            (0..500).map(|i| Some(synthetic_payload(i, "x"))).collect();
         bank[7] = None;
-        assert!(matches!(bank_bytes(&bank), Err(ExportError::IncompleteBank(1))));
+        assert!(matches!(
+            bank_bytes(&bank),
+            Err(ExportError::IncompleteBank(1))
+        ));
     }
 }

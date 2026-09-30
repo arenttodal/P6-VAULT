@@ -1,7 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 pub fn new_id() -> String {
@@ -14,7 +17,12 @@ pub fn file_timestamp(ms: i64) -> String {
     let days = secs.div_euclid(86400);
     let sod = secs.rem_euclid(86400);
     let (y, m, d) = civil_from_days(days);
-    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+        sod / 3600,
+        (sod % 3600) / 60,
+        sod % 60
+    )
 }
 
 fn civil_from_days(z: i64) -> (i64, u32, u32) {

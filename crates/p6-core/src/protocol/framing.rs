@@ -24,7 +24,11 @@ pub enum FrameEvent {
     /// A complete frame including leading F0 and trailing F7.
     Frame { bytes: Vec<u8>, start_offset: u64 },
     /// An invalid/abandoned frame. `bytes` holds what was retained (bounded).
-    Malformed { reason: MalformedReason, bytes: Vec<u8>, start_offset: u64 },
+    Malformed {
+        reason: MalformedReason,
+        bytes: Vec<u8>,
+        start_offset: u64,
+    },
 }
 
 pub fn is_realtime(b: u8) -> bool {
@@ -49,7 +53,14 @@ pub const FILE_MAX_FRAME: usize = 1 << 20;
 
 impl FrameAssembler {
     pub fn new(max_frame: usize) -> Self {
-        Self { max_frame, buf: Vec::new(), in_frame: false, oversize: false, frame_start: 0, offset: 0 }
+        Self {
+            max_frame,
+            buf: Vec::new(),
+            in_frame: false,
+            oversize: false,
+            frame_start: 0,
+            offset: 0,
+        }
     }
 
     pub fn in_frame(&self) -> bool {
@@ -111,7 +122,10 @@ impl FrameAssembler {
                             });
                         } else {
                             self.buf.push(0xF7);
-                            out.push(FrameEvent::Frame { bytes: std::mem::take(&mut self.buf), start_offset: self.frame_start });
+                            out.push(FrameEvent::Frame {
+                                bytes: std::mem::take(&mut self.buf),
+                                start_offset: self.frame_start,
+                            });
                         }
                     }
                     // Stray F7 outside a frame is irrelevant data.
@@ -168,12 +182,19 @@ mod tests {
     fn concatenated_and_realtime() {
         let data = [0xF0, 0x01, 0xF8, 0x02, 0xF7, 0x00, 0xF0, 0x03, 0xFE, 0xF7];
         let ev = split_all(&data, 64);
-        assert_eq!(frames(&ev), vec![vec![0xF0, 0x01, 0x02, 0xF7], vec![0xF0, 0x03, 0xF7]]);
+        assert_eq!(
+            frames(&ev),
+            vec![vec![0xF0, 0x01, 0x02, 0xF7], vec![0xF0, 0x03, 0xF7]]
+        );
     }
 
     #[test]
     fn every_split_boundary() {
-        let data: Vec<u8> = [vec![0xF0, 0x01, 0x2D, 0x06, 0xF7], vec![0xF0, 0x01, 0x02, 0x03, 0xF7]].concat();
+        let data: Vec<u8> = [
+            vec![0xF0, 0x01, 0x2D, 0x06, 0xF7],
+            vec![0xF0, 0x01, 0x02, 0x03, 0xF7],
+        ]
+        .concat();
         for cut in 0..=data.len() {
             let mut a = FrameAssembler::new(64);
             let mut out = Vec::new();
@@ -187,16 +208,34 @@ mod tests {
     #[test]
     fn nested_start_abandons_prior() {
         let ev = split_all(&[0xF0, 0x01, 0xF0, 0x02, 0xF7], 64);
-        assert!(matches!(ev[0], FrameEvent::Malformed { reason: MalformedReason::NestedStart, .. }));
+        assert!(matches!(
+            ev[0],
+            FrameEvent::Malformed {
+                reason: MalformedReason::NestedStart,
+                ..
+            }
+        ));
         assert_eq!(frames(&ev), vec![vec![0xF0, 0x02, 0xF7]]);
     }
 
     #[test]
     fn truncated_and_status() {
         let ev = split_all(&[0xF0, 0x01, 0x02], 64);
-        assert!(matches!(ev[0], FrameEvent::Malformed { reason: MalformedReason::Truncated, .. }));
+        assert!(matches!(
+            ev[0],
+            FrameEvent::Malformed {
+                reason: MalformedReason::Truncated,
+                ..
+            }
+        ));
         let ev = split_all(&[0xF0, 0x01, 0x90, 0x40, 0x40, 0xF7], 64);
-        assert!(matches!(ev[0], FrameEvent::Malformed { reason: MalformedReason::UnexpectedStatus(0x90), .. }));
+        assert!(matches!(
+            ev[0],
+            FrameEvent::Malformed {
+                reason: MalformedReason::UnexpectedStatus(0x90),
+                ..
+            }
+        ));
         assert_eq!(ev.len(), 1);
     }
 
@@ -206,12 +245,20 @@ mod tests {
         data.extend(std::iter::repeat_n(0x11, 100));
         data.push(0xF7);
         let ev = split_all(&data, 16);
-        assert!(matches!(&ev[0], FrameEvent::Malformed { reason: MalformedReason::Oversize, bytes, .. } if bytes.len() < 16));
+        assert!(
+            matches!(&ev[0], FrameEvent::Malformed { reason: MalformedReason::Oversize, bytes, .. } if bytes.len() < 16)
+        );
     }
 
     #[test]
     fn offsets_recorded() {
         let ev = split_all(&[0x00, 0x00, 0xF0, 0x01, 0xF7], 16);
-        assert!(matches!(ev[0], FrameEvent::Frame { start_offset: 2, .. }));
+        assert!(matches!(
+            ev[0],
+            FrameEvent::Frame {
+                start_offset: 2,
+                ..
+            }
+        ));
     }
 }

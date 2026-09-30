@@ -33,9 +33,17 @@ pub struct ReadSessionState {
 }
 
 impl Vault {
-    pub fn begin_read_session(&mut self, purpose: &str, device: &str, epoch: u64) -> VResult<String> {
+    pub fn begin_read_session(
+        &mut self,
+        purpose: &str,
+        device: &str,
+        epoch: u64,
+    ) -> VResult<String> {
         let tx = self.conn.transaction()?;
-        let name = format!("Hardware read {} ({purpose})", crate::util::file_timestamp(now_ms()));
+        let name = format!(
+            "Hardware read {} ({purpose})",
+            crate::util::file_timestamp(now_ms())
+        );
         let sid = insert_source(&tx, &name, "partial_read", None, None, None, Some(device))?;
         let id = new_id();
         tx.execute(
@@ -49,31 +57,74 @@ impl Vault {
     /// Persist one received slot immediately.
     pub fn record_read_slot(&mut self, session: &str, slot: u16, p: &Payload) -> VResult<()> {
         let tx = self.conn.transaction()?;
-        let sid: String = tx.query_row("SELECT source_id FROM read_sessions WHERE id=?1", [session], |r| r.get(0))?;
+        let sid: String = tx.query_row(
+            "SELECT source_id FROM read_sessions WHERE id=?1",
+            [session],
+            |r| r.get(0),
+        )?;
         let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM source_occurrences WHERE source_id=?1 AND orig_address=?2)", params![sid, slot], |r| r.get(0))?;
         if exists {
-            return Err(VaultError::Invalid(format!("slot {slot:03} already recorded in this read")));
+            return Err(VaultError::Invalid(format!(
+                "slot {slot:03} already recorded in this read"
+            )));
         }
         let (hash, _) = insert_blob(&tx, p)?;
-        insert_occurrence(&tx, &sid, &hash, slot as usize, None, "program", Some(slot), None, false)?;
-        tx.execute("UPDATE read_sessions SET received=received+1 WHERE id=?1", [session])?;
+        insert_occurrence(
+            &tx,
+            &sid,
+            &hash,
+            slot as usize,
+            None,
+            "program",
+            Some(slot),
+            None,
+            false,
+        )?;
+        tx.execute(
+            "UPDATE read_sessions SET received=received+1 WHERE id=?1",
+            [session],
+        )?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn read_session_state(&self, session: &str) -> VResult<ReadSessionState> {
-        let (sid, status, snap): (String, String, Option<String>) =
-            self.conn.query_row("SELECT source_id, status, snapshot_id FROM read_sessions WHERE id=?1", [session], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        let mut st = self.conn.prepare("SELECT orig_address FROM source_occurrences WHERE source_id=?1 AND orig_address < 500")?;
-        let have: std::collections::HashSet<u16> = st.query_map([&sid], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        let (sid, status, snap): (String, String, Option<String>) = self.conn.query_row(
+            "SELECT source_id, status, snapshot_id FROM read_sessions WHERE id=?1",
+            [session],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let mut st = self.conn.prepare(
+            "SELECT orig_address FROM source_occurrences WHERE source_id=?1 AND orig_address < 500",
+        )?;
+        let have: std::collections::HashSet<u16> = st
+            .query_map([&sid], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         let missing: Vec<u16> = (0..500).filter(|s| !have.contains(s)).collect();
-        Ok(ReadSessionState { id: session.into(), source_id: sid, received: have.len(), missing, status, snapshot_id: snap })
+        Ok(ReadSessionState {
+            id: session.into(),
+            source_id: sid,
+            received: have.len(),
+            missing,
+            status,
+            snapshot_id: snap,
+        })
     }
 
     /// Finish a read. Seals a live snapshot only if all 500 slots were received.
-    pub fn finish_read_session(&mut self, session: &str, cancelled: bool, kind: &str, origin: &str) -> VResult<ReadSessionState> {
+    pub fn finish_read_session(
+        &mut self,
+        session: &str,
+        cancelled: bool,
+        kind: &str,
+        origin: &str,
+    ) -> VResult<ReadSessionState> {
         let state = self.read_session_state(session)?;
-        let (device, started): (Option<String>, i64) = self.conn.query_row("SELECT device, started_ms FROM read_sessions WHERE id=?1", [session], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let (device, started): (Option<String>, i64) = self.conn.query_row(
+            "SELECT device, started_ms FROM read_sessions WHERE id=?1",
+            [session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         let tx = self.conn.transaction()?;
         let status;
         let mut snap_id = None;
@@ -88,8 +139,15 @@ impl Vault {
                 params![sid, state.source_id],
             )?;
             seal(&tx, &sid)?;
-            let src_kind = if kind == "post_write" { "post_write" } else { "live_snapshot" };
-            tx.execute("UPDATE sources SET kind=?2 WHERE id=?1", params![state.source_id, src_kind])?;
+            let src_kind = if kind == "post_write" {
+                "post_write"
+            } else {
+                "live_snapshot"
+            };
+            tx.execute(
+                "UPDATE sources SET kind=?2 WHERE id=?1",
+                params![state.source_id, src_kind],
+            )?;
             status = "complete";
             snap_id = Some(sid);
         } else {
@@ -110,7 +168,9 @@ impl Vault {
         for (occ, addr, hash) in progs {
             if let Some(a) = addr.filter(|a| *a < 500) {
                 if cells[a as usize].is_some() {
-                    return Err(VaultError::Invalid(format!("source has more than one program for slot {a:03}; choose explicitly")));
+                    return Err(VaultError::Invalid(format!(
+                        "source has more than one program for slot {a:03}; choose explicitly"
+                    )));
                 }
                 cells[a as usize] = Some((hash, occ));
             }
@@ -119,7 +179,11 @@ impl Vault {
         if missing > 0 {
             return Err(VaultError::IncompleteBank(missing));
         }
-        let name: String = self.conn.query_row("SELECT name FROM sources WHERE id=?1", [source_id], |r| r.get(0))?;
+        let name: String =
+            self.conn
+                .query_row("SELECT name FROM sources WHERE id=?1", [source_id], |r| {
+                    r.get(0)
+                })?;
         let tx = self.conn.transaction()?;
         let sid = new_id();
         let now = now_ms();
@@ -152,7 +216,14 @@ impl Vault {
 
     pub fn snapshot_cells(&self, id: &str) -> VResult<Vec<SnapCell>> {
         let mut st = self.conn.prepare("SELECT blob_hash, occurrence_id FROM snapshot_slots WHERE snapshot_id=?1 ORDER BY slot")?;
-        let cells: Vec<SnapCell> = st.query_map([id], |r| Ok(SnapCell { blob_hash: r.get(0)?, occurrence_id: r.get(1)? }))?.collect::<Result<_, _>>()?;
+        let cells: Vec<SnapCell> = st
+            .query_map([id], |r| {
+                Ok(SnapCell {
+                    blob_hash: r.get(0)?,
+                    occurrence_id: r.get(1)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
         if cells.len() != 500 {
             return Err(VaultError::IncompleteBank(500 - cells.len()));
         }
@@ -160,7 +231,10 @@ impl Vault {
     }
 
     pub fn snapshot_payloads(&self, id: &str) -> VResult<Vec<Payload>> {
-        self.snapshot_cells(id)?.iter().map(|c| self.payload(&c.blob_hash)).collect()
+        self.snapshot_cells(id)?
+            .iter()
+            .map(|c| self.payload(&c.blob_hash))
+            .collect()
     }
 }
 
@@ -178,7 +252,11 @@ fn snap_row(r: &rusqlite::Row) -> rusqlite::Result<SnapshotRow> {
 }
 
 pub(crate) fn seal(tx: &Transaction, id: &str) -> VResult<()> {
-    let n: i64 = tx.query_row("SELECT COUNT(*) FROM snapshot_slots WHERE snapshot_id=?1", [id], |r| r.get(0))?;
+    let n: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM snapshot_slots WHERE snapshot_id=?1",
+        [id],
+        |r| r.get(0),
+    )?;
     if n != 500 {
         return Err(VaultError::IncompleteBank(500 - n as usize));
     }
@@ -196,7 +274,8 @@ mod tests {
         let (_d, mut v) = vault();
         let s = v.begin_read_session("sync", "sim", 1).unwrap();
         for i in 0..497u16 {
-            v.record_read_slot(&s, i, &synthetic_payload(i as u32, "x")).unwrap();
+            v.record_read_slot(&s, i, &synthetic_payload(i as u32, "x"))
+                .unwrap();
         }
         let st = v.finish_read_session(&s, false, "live", "test").unwrap();
         assert_eq!(st.missing, vec![497, 498, 499]);
@@ -209,13 +288,26 @@ mod tests {
         let (_d, mut v) = vault();
         let s = v.begin_read_session("sync", "sim", 1).unwrap();
         for i in 0..500u16 {
-            v.record_read_slot(&s, i, &synthetic_payload(i as u32, "x")).unwrap();
+            v.record_read_slot(&s, i, &synthetic_payload(i as u32, "x"))
+                .unwrap();
         }
         let st = v.finish_read_session(&s, false, "live", "test").unwrap();
         let id = st.snapshot_id.unwrap();
         assert!(v.snapshot(&id).unwrap().sealed);
-        assert_eq!(v.snapshot_payloads(&id).unwrap()[42], synthetic_payload(42, "x"));
-        assert!(v.conn.execute("UPDATE snapshot_slots SET slot=slot WHERE snapshot_id=?1", [&id]).is_err());
-        assert!(v.conn.execute("INSERT INTO snapshot_slots VALUES(?1, 0, 'x', NULL)", [&id]).is_err());
+        assert_eq!(
+            v.snapshot_payloads(&id).unwrap()[42],
+            synthetic_payload(42, "x")
+        );
+        assert!(v
+            .conn
+            .execute(
+                "UPDATE snapshot_slots SET slot=slot WHERE snapshot_id=?1",
+                [&id]
+            )
+            .is_err());
+        assert!(v
+            .conn
+            .execute("INSERT INTO snapshot_slots VALUES(?1, 0, 'x', NULL)", [&id])
+            .is_err());
     }
 }
