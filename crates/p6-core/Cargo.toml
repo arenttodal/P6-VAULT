@@ -1,0 +1,19 @@
+[package]
+name = "p6-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure Rust core for P6 Vault: Prophet-6 SysEx protocol, library, workspace, simulator and guarded write engine"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
