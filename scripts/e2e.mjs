@@ -260,6 +260,43 @@ try {
     await shot("11-history");
     await click("//div[@role='dialog']//button[@aria-label='Close']");
   });
+  await step("stage an offline change before restart", async () => {
+    await exec("document.querySelector('.bank .scroll').scrollTop = 0");
+    await sleep(200);
+    await click("//section[contains(@class,'bank')]//div[contains(@class,'row')][.//span[normalize-space()='000']]");
+    await click(btn("Swap…"));
+    const inp = await find("//div[@role='dialog']//input[@inputmode='numeric']");
+    await wd("POST", S(`/element/${inp}/click`), {});
+    await key("a", [CTRL]);
+    await wd("POST", S(`/element/${inp}/value`), { text: "499" });
+    await click("//div[@role='dialog']//button[normalize-space()='Swap']");
+    await waitFor("s.workspace.changed_count === 2", 5000, "swap staged");
+    const search = await find("//input[contains(@class,'search')]");
+    await wd("POST", S(`/element/${search}/value`), { text: "Sim Keys" });
+    await sleep(900); // debounced UI context save
+  });
+
+  await step("restart: library, New, history, context and mode survive", async () => {
+    const before = await state("({ n: s.occurrences.length, ws: s.workspace.id, changed: s.workspace.changed_count })");
+    await wd("DELETE", `/session/${sid}`);
+    sid = null;
+    await sleep(1500);
+    const sess = await wd("POST", "/session", { capabilities: { alwaysMatch: { "tauri:options": { application: app } } } });
+    sid = sess.sessionId;
+    await waitFor("s.info && s.workspace && s.status", 15000, "reloaded");
+    const after = await state("({ n: s.occurrences.length, ws: s.workspace.id, changed: s.workspace.changed_count, undo: s.workspace.can_undo, sim: s.status.simulator_mode, search: s.filter.search, conn: s.status.state, unfinished: s.info.unfinished_sessions.length })");
+    if (after.n !== before.n || after.ws !== before.ws || after.changed !== 2) throw new Error(JSON.stringify({ before, after }));
+    if (!after.undo || !after.sim || after.search !== "Sim Keys" || after.conn !== "Offline" || after.unfinished !== 0) throw new Error(JSON.stringify(after));
+    await shot("13-after-restart");
+    await key("z", [CTRL]);
+    await waitFor("s.workspace.changed_count === 0", 5000, "undo after restart");
+  });
+
+  await step("offline audition explains missing connection; no MIDI", async () => {
+    await click("//section[contains(@class,'bank')]//div[contains(@class,'row')][.//span[normalize-space()='000']]");
+    await key(ENTER);
+    await find("//div[contains(@class,'toast')][contains(., 'Connect the synth to audition')]");
+  });
 } catch (e) {
   process.exitCode = 1;
 } finally {

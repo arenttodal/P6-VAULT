@@ -63,12 +63,15 @@ impl AppState {
         std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
         let lock = File::create(base_dir.join("p6vault.lock")).map_err(|e| e.to_string())?;
         fs2::FileExt::try_lock_exclusive(&lock).map_err(|_| "P6 Vault is already running with this library. Close the other window first.".to_string())?;
-        let mut vault = Vault::open(&base_dir).map_err(|e| e.to_string())?;
+        // Remember Simulator mode across restarts (the badge always shows it).
+        let simulator = std::fs::read_to_string(base_dir.join("mode")).map(|m| m.trim() == "simulator").unwrap_or(false);
+        let dir = if simulator { base_dir.join("simulator") } else { base_dir.clone() };
+        let mut vault = Vault::open(&dir).map_err(|e| e.to_string())?;
         let unfinished = vault.startup_recovery_scan().map_err(|e| e.to_string())?;
         Ok(Self {
             base_dir,
             vault: RwLock::new(Arc::new(Mutex::new(vault))),
-            simulator_mode: AtomicBool::new(false),
+            simulator_mode: AtomicBool::new(simulator),
             conn: Mutex::new(None),
             epoch: AtomicU64::new(1),
             busy: Mutex::new(None),
@@ -107,6 +110,7 @@ impl AppState {
         *self.vault.write().unwrap() = Arc::new(Mutex::new(v));
         *self.startup_unfinished.lock().unwrap() = unfinished;
         self.simulator_mode.store(simulator, Ordering::SeqCst);
+        let _ = std::fs::write(self.base_dir.join("mode"), if simulator { "simulator" } else { "hardware" });
         self.previews.lock().unwrap().clear();
         *self.clipboard.lock().unwrap() = None;
         Ok(())
