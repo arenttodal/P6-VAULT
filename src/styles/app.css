@@ -150,3 +150,5 @@ details summary { cursor: default; color: var(--accent-2); }
 .toast.error { border-left-color: var(--danger); }
 .toast.success { border-left-color: var(--ok); }
 .app.busy .pane .row { cursor: default; }
+.hw-reads { margin: 4px 6px; }
+.hw-reads summary { color: var(--muted); font-size: 11px; padding: 2px 0; }

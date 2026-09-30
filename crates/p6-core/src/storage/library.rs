@@ -454,6 +454,19 @@ mod tests {
     }
 
     #[test]
+    fn import_mixed_file_with_foreign_messages() {
+        let (_d, mut v) = vault();
+        let mut data = vec![0xF0, 0x42, 0x30, 0x00, 0xF7];
+        data.extend(program_file_frame(StoredAddress::from_absolute(3).unwrap(), &synthetic_payload(3, "x")));
+        let p = preview_import("m.syx", &data).unwrap();
+        let s = v.commit_import(&p, None, &data).unwrap();
+        assert_eq!(s.programs, 1);
+        assert_eq!(s.excluded, 1);
+        let (_, path) = v.source_archive(&s.source_id).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), data);
+    }
+
+    #[test]
     fn blobs_immutable() {
         let (_d, mut v) = vault();
         let data = program_file_frame(

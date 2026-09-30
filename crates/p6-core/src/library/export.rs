@@ -61,6 +61,10 @@ pub enum Expected {
 }
 
 pub fn verify_bytes(bytes: &[u8], expected: &Expected) -> Result<(), ExportError> {
+    // Raw copies (original archives, manifests) are verified byte-for-byte by the caller only.
+    if matches!(expected, Expected::Raw) {
+        return Ok(());
+    }
     let parsed: Vec<P6Message> = split_all(bytes, FILE_MAX_FRAME)
         .into_iter()
         .map(|e| match e {
@@ -168,6 +172,15 @@ mod tests {
             prev.complete_user_bank().unwrap(),
             bank.into_iter().map(Option::unwrap).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn raw_copy_of_mixed_file_verifies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mixed.syx");
+        let bytes = [0xF0u8, 0x42, 0x30, 0x00, 0xF7, 0x01, 0x02];
+        write_verified(&path, &bytes, &Expected::Raw).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
 
     #[test]

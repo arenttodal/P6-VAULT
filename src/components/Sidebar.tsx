@@ -1,17 +1,22 @@
 import { useMemo } from "react";
 import { api } from "../api/backend";
-import { CATEGORIES } from "../api/types";
+import { CATEGORIES, type SourceRow } from "../api/types";
+import { defaultVisibleSources, scopeRows } from "../lib/library";
 import { useApp } from "../stores/app";
 
 export function Sidebar() {
   const { sources, occurrences, filter, setFilter, workspaces, workspace, openDialog, refreshWorkspace, error, toast } = useApp();
+  const visible = useMemo(() => defaultVisibleSources(sources), [sources]);
+  const mainSources = sources.filter((s) => visible.has(s.id));
+  const hwReads = sources.filter((s) => !visible.has(s.id)).sort((a, b) => b.created_ms - a.created_ms);
+  const scoped = useMemo(() => scopeRows(occurrences, { sourceId: null }, visible), [occurrences, visible]);
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     let fav = 0,
       dupE = 0,
       dupN = 0,
       uncl = 0;
-    for (const o of occurrences) {
+    for (const o of scoped) {
       c[o.effective_category] = (c[o.effective_category] ?? 0) + 1;
       if (o.favorite) fav++;
       if (o.dup_exact > 0) dupE++;
@@ -19,7 +24,7 @@ export function Sidebar() {
       if (!o.manual_category && o.auto_category === "Other") uncl++;
     }
     return { c, fav, dupE, dupN, uncl };
-  }, [occurrences]);
+  }, [scoped]);
 
   const buildFrom = async (sourceId: string, name: string) => {
     try {
@@ -53,30 +58,7 @@ export function Sidebar() {
   const clearFilters = () => setFilter({ sourceId: null, category: null, favoritesOnly: false, dup: "all", unclassifiedOnly: false });
   const noneActive = !filter.sourceId && !filter.category && !filter.favoritesOnly && filter.dup === "all" && !filter.unclassifiedOnly;
 
-  return (
-    <aside className="sidebar">
-      <h3>Library</h3>
-      <ul>
-        {item("All sounds", noneActive, clearFilters, occurrences.length)}
-        {item("Favorites", filter.favoritesOnly, () => setFilter({ favoritesOnly: !filter.favoritesOnly }), counts.fav)}
-        {item("Exact duplicates", filter.dup === "exact", () => setFilter({ dup: filter.dup === "exact" ? "all" : "exact" }), counts.dupE, "Identical payload in more than one place")}
-        {item("Same except name", filter.dup === "name", () => setFilter({ dup: filter.dup === "name" ? "all" : "name" }), counts.dupN, "Identical payload apart from the 20 name bytes")}
-        {item("Unclassified", filter.unclassifiedOnly, () => setFilter({ unclassifiedOnly: !filter.unclassifiedOnly }), counts.uncl)}
-      </ul>
-      <h3>Categories</h3>
-      <ul>
-        {CATEGORIES.map((c, i) => (
-          <li key={c} className={filter.category === c ? "active" : ""} onClick={() => setFilter({ category: filter.category === c ? null : c })} title={`Shortcut ${i + 1} assigns this category`}>
-            <span className={`cat-dot cat-${i}`} aria-hidden />
-            <span className="label">{c}</span>
-            <span className="count">{counts.c[c] ?? 0}</span>
-          </li>
-        ))}
-      </ul>
-      <h3>Sources</h3>
-      <ul className="sources">
-        {sources.length === 0 && <li className="hint">Import .syx files or sync from the synth.</li>}
-        {sources.map((s) => (
+  const sourceItem = (s: SourceRow) => (
           <li key={s.id} className={filter.sourceId === s.id ? "active" : ""} onClick={() => setFilter({ sourceId: filter.sourceId === s.id ? null : s.id })} title={s.original_path ?? s.name}>
             <span className="label">{s.name}</span>
             <span className="count">{s.count}</span>
@@ -107,8 +89,39 @@ export function Sidebar() {
               )}
             </span>
           </li>
+        );
+
+  return (
+    <aside className="sidebar">
+      <h3>Library</h3>
+      <ul>
+        {item("All sounds", noneActive, clearFilters, scoped.length)}
+        {item("Favorites", filter.favoritesOnly, () => setFilter({ favoritesOnly: !filter.favoritesOnly }), counts.fav)}
+        {item("Exact duplicates", filter.dup === "exact", () => setFilter({ dup: filter.dup === "exact" ? "all" : "exact" }), counts.dupE, "Identical payload in more than one place")}
+        {item("Same except name", filter.dup === "name", () => setFilter({ dup: filter.dup === "name" ? "all" : "name" }), counts.dupN, "Identical payload apart from the 20 name bytes")}
+        {item("Unclassified", filter.unclassifiedOnly, () => setFilter({ unclassifiedOnly: !filter.unclassifiedOnly }), counts.uncl)}
+      </ul>
+      <h3>Categories</h3>
+      <ul>
+        {CATEGORIES.map((c, i) => (
+          <li key={c} className={filter.category === c ? "active" : ""} onClick={() => setFilter({ category: filter.category === c ? null : c })} title={`Shortcut ${i + 1} assigns this category`}>
+            <span className={`cat-dot cat-${i}`} aria-hidden />
+            <span className="label">{c}</span>
+            <span className="count">{counts.c[c] ?? 0}</span>
+          </li>
         ))}
       </ul>
+      <h3>Sources</h3>
+      <ul className="sources">
+        {mainSources.length === 0 && <li className="hint">Import .syx files or sync from the synth.</li>}
+        {mainSources.map(sourceItem)}
+      </ul>
+      {hwReads.length > 0 && (
+        <details className="hw-reads">
+          <summary>Hardware reads & backups ({hwReads.length})</summary>
+          <ul className="sources">{hwReads.map(sourceItem)}</ul>
+        </details>
+      )}
       <h3>Banks</h3>
       <ul>
         {workspaces.map((w) => (

@@ -139,10 +139,10 @@ impl Vault {
                 params![sid, state.source_id],
             )?;
             seal(&tx, &sid)?;
-            let src_kind = if kind == "post_write" {
-                "post_write"
-            } else {
-                "live_snapshot"
+            let src_kind = match kind {
+                "post_write" => "post_write",
+                "prewrite" => "backup",
+                _ => "live_snapshot",
             };
             tx.execute(
                 "UPDATE sources SET kind=?2 WHERE id=?1",

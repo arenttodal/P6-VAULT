@@ -6,10 +6,25 @@ import { useApp } from "../../stores/app";
 import { Modal } from "../Modal";
 
 function SlotInput({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
+  const [text, setText] = useState(String(value).padStart(3, "0"));
+  const n = /^\d{1,3}$/.test(text.trim()) ? Number(text.trim()) : NaN;
+  const bad = !(n >= 0 && n <= 499);
   return (
     <label>
       {label}
-      <input className="mono" type="number" min={0} max={499} value={value} onChange={(e) => onChange(Math.max(0, Math.min(499, Number(e.target.value) || 0)))} />
+      <input
+        className="mono"
+        inputMode="numeric"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = e.target.value.trim();
+          if (/^\d{1,3}$/.test(v) && Number(v) <= 499) onChange(Number(v));
+        }}
+        onFocus={(e) => e.target.select()}
+        aria-invalid={bad}
+      />
+      {bad && <span className="error small">Enter a slot from 000 to 499.</span>}
     </label>
   );
 }

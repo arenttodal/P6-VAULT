@@ -2,7 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef } from "react";
 import { api } from "../api/backend";
 import type { OccurrenceRow } from "../api/types";
-import { filterLibrary, formatAddress, type LibSort } from "../lib/library";
+import { defaultVisibleSources, filterLibrary, formatAddress, type LibSort } from "../lib/library";
 import { clickSelect, orderedSelection, pruneToVisible } from "../lib/selection";
 import { useApp } from "../stores/app";
 import { beginPointerDrag } from "./dragging";
@@ -13,7 +13,9 @@ export const ROW_H = 24;
 export function useFilteredLibrary(): OccurrenceRow[] {
   const occurrences = useApp((s) => s.occurrences);
   const filter = useApp((s) => s.filter);
-  return useMemo(() => filterLibrary(occurrences, filter), [occurrences, filter]);
+  const sources = useApp((s) => s.sources);
+  const visible = useMemo(() => defaultVisibleSources(sources), [sources]);
+  return useMemo(() => filterLibrary(occurrences, filter, visible), [occurrences, filter, visible]);
 }
 
 export function LibraryPane({ searchRef }: { searchRef: React.RefObject<HTMLInputElement | null> }) {
