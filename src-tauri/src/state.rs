@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// Fault-injection handles into the simulated synth.
+pub type SimHandles = Option<(Arc<Mutex<p6_core::simulator::SimState>>, Arc<Mutex<p6_core::simulator::SimControl>>)>;
+
 pub struct Connection {
     pub actor: Arc<DeviceActor>,
     pub epoch: u64,
@@ -23,7 +26,7 @@ pub struct Connection {
     /// The edit buffer has been captured (protected) during this connection.
     pub buffer_protected: bool,
     /// Fault-injection handles, present only for the simulator.
-    pub sim: Option<(Arc<Mutex<p6_core::simulator::SimState>>, Arc<Mutex<p6_core::simulator::SimControl>>)>,
+    pub sim: SimHandles,
 }
 
 #[derive(Debug, Clone, Serialize)]

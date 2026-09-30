@@ -26,6 +26,7 @@ function row(p: Partial<OccurrenceRow>): OccurrenceRow {
     params_available: true,
     badges: [],
     noncanonical: false,
+    format_version: 1,
     ...p,
   };
 }

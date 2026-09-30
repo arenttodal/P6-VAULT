@@ -150,7 +150,7 @@ export function LibraryPane({ searchRef }: { searchRef: React.RefObject<HTMLInpu
                   });
                 }}
                 onDoubleClick={() => void useApp.getState().auditionHash(r.exact_hash, r.display_name, true)}
-                title={r.stored_name && r.vault_label ? `Stored name: ${r.stored_name}` : undefined}
+                title={`${r.stored_name && r.vault_label ? `Stored name: ${r.stored_name} · ` : ""}format byte ${r.format_version}${r.params_available ? "" : " · parameters unavailable (unsupported layout)"}`}
               >
                 <span
                   className={`fav ${r.favorite ? "on" : ""}`}

@@ -54,6 +54,7 @@ pub struct OccurrenceRow {
     pub params_available: bool,
     pub badges: Vec<String>,
     pub noncanonical: bool,
+    pub format_version: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -90,7 +91,7 @@ SELECT o.id, o.source_id, s.name, s.kind, o.message_index, o.kind, o.orig_addres
        (SELECT COUNT(*) FROM source_occurrences o2 WHERE o2.blob_hash = o.blob_hash) - 1,
        (SELECT COUNT(*) FROM source_occurrences o3 JOIN patch_blobs b3 ON b3.hash=o3.blob_hash
           WHERE b.ni_hash IS NOT NULL AND b3.ni_hash = b.ni_hash AND b3.hash <> b.hash),
-       c.params_available, c.badges, o.noncanonical
+       c.params_available, c.badges, o.noncanonical, b.format_version
 FROM source_occurrences o
 JOIN sources s ON s.id = o.source_id
 JOIN patch_blobs b ON b.hash = o.blob_hash
@@ -136,6 +137,7 @@ pub(crate) fn occ_row(r: &rusqlite::Row) -> rusqlite::Result<OccurrenceRow> {
         params_available: r.get::<_, Option<bool>>(17)?.unwrap_or(false),
         badges: badges.and_then(|b| serde_json::from_str(&b).ok()).unwrap_or_default(),
         noncanonical: r.get(19)?,
+        format_version: r.get(20)?,
     })
 }
 
@@ -386,5 +388,33 @@ mod tests {
         let p = preview_import("a.syx", &data).unwrap();
         v.commit_import(&p, None, &data).unwrap();
         assert!(v.conn.execute("UPDATE patch_blobs SET payload=zeroblob(1024)", []).is_err());
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::super::testutil::vault;
+    use crate::library::export::bank_bytes;
+    use crate::library::import::preview_import;
+    use crate::protocol::payload::synthetic_payload;
+    use crate::Payload;
+
+    /// 10,000 occurrences (20 banks, half of them repeated payloads): the library listing
+    /// must stay fast enough for interactive use.
+    #[test]
+    fn list_10k_occurrences_quickly() {
+        let (_d, mut v) = vault();
+        for f in 0..20u32 {
+            let bank: Vec<Option<Payload>> = (0..500u32).map(|i| Some(synthetic_payload((f % 10) * 1000 + i, &format!("F{f} P{i}")))).collect();
+            let bytes = bank_bytes(&bank).unwrap();
+            let p = preview_import(&format!("f{f}.syx"), &bytes).unwrap();
+            v.commit_import(&p, None, &bytes).unwrap();
+        }
+        let t = std::time::Instant::now();
+        let rows = v.list_occurrences().unwrap();
+        let ms = t.elapsed().as_millis();
+        eprintln!("list_occurrences(10k) took {ms} ms");
+        assert_eq!(rows.len(), 10_000);
+        assert!(ms < 3000, "too slow: {ms} ms");
     }
 }

@@ -145,6 +145,7 @@ export interface OccurrenceRow {
   params_available: boolean;
   badges: string[];
   noncanonical: boolean;
+  format_version: number;
 }
 
 export interface ClassificationDetail {

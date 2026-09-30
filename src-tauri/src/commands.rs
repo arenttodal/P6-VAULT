@@ -2,7 +2,7 @@
 
 use crate::errors::{ApiError, ApiResult};
 use crate::midi;
-use crate::state::{AppState, Connection, ConnectionStatus, PendingImport};
+use crate::state::{AppState, Connection, ConnectionStatus, PendingImport, SimHandles};
 use p6_core::deployment::plan::{self, PrepareOutcome};
 use p6_core::deployment::{recovery, sync, writer, Progress};
 use p6_core::device::actor::{AuditionOutcome, AuditionRequest, DeviceActor};
@@ -81,8 +81,6 @@ fn spawn_actor(app: &AppHandle, device: Device) -> Arc<DeviceActor> {
         let _ = app2.emit("audition", payload);
     }))
 }
-
-type SimHandles = Option<(Arc<Mutex<p6_core::simulator::SimState>>, Arc<Mutex<p6_core::simulator::SimControl>>)>;
 
 fn finish_connect(
     app: &AppHandle,
