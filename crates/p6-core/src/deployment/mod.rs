@@ -22,13 +22,7 @@ pub struct Progress {
 
 impl Progress {
     pub fn new(phase: &str, done: usize, total: usize, slot: Option<u16>) -> Self {
-        Self {
-            phase: phase.into(),
-            done,
-            total,
-            slot,
-            message: None,
-        }
+        Self { phase: phase.into(), done, total, slot, message: None }
     }
 }
 
@@ -41,9 +35,7 @@ pub enum DeployError {
     Vault(#[from] VaultError),
     #[error("the bank read is incomplete: {missing} slot(s) missing")]
     IncompleteBank { missing: usize },
-    #[error(
-        "the synth changed since Current was captured ({slots} slot(s)); reconcile before writing"
-    )]
+    #[error("the synth changed since Current was captured ({slots} slot(s)); reconcile before writing")]
     HardwareDrift { slots: usize },
     #[error("backup failed: {0}")]
     BackupFailed(String),
@@ -57,6 +49,10 @@ pub enum DeployError {
     Invalid(String),
     #[error("cancelled")]
     Cancelled,
+    #[error(
+        "hardware validation is not complete ({done}/{required} single-slot tests). Until then, real writes are limited to exactly one changed slot (New has {changed}). See docs/HARDWARE-TESTS.md."
+    )]
+    HardwareGate { done: usize, required: usize, changed: usize },
 }
 
 pub type DResult<T> = Result<T, DeployError>;

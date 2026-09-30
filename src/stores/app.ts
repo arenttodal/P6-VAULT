@@ -136,6 +136,19 @@ export const useApp = create<State & Actions>((set, get) => ({
       /* defaults */
     }
     set({ info, status, autoAudition: auto, midiChannel: ch });
+    try {
+      const ctx = JSON.parse((await b.getSetting("uiContext")) ?? "null");
+      if (ctx && typeof ctx === "object") {
+        set({
+          filter: { ...defaultFilter, ...(ctx.filter ?? {}) },
+          changedOnly: !!ctx.changedOnly,
+          pane: ctx.pane === "library" ? "library" : "bank",
+          bankSel: typeof ctx.bankFocus === "number" ? { ids: new Set([ctx.bankFocus]), anchor: ctx.bankFocus, focus: ctx.bankFocus } : emptySelection(),
+        });
+      }
+    } catch {
+      /* ignore stale context */
+    }
     await Promise.all([get().refreshLibrary(), get().refreshWorkspace()]);
     const s = info.unfinished_sessions[0];
     if (s) set({ dialog: { kind: "recovery", session: s, report: null } });
@@ -260,3 +273,21 @@ export const useApp = create<State & Actions>((set, get) => ({
   openDialog: (d) => set({ dialog: d }),
   closeDialog: () => set({ dialog: null }),
 }));
+
+/** Persist lightweight UI context (debounced; never sound data). */
+let ctxTimer: ReturnType<typeof setTimeout> | null = null;
+let lastCtx = "";
+useApp.subscribe((s) => {
+  if (!s.info) return;
+  const ctx = JSON.stringify({ filter: s.filter, changedOnly: s.changedOnly, pane: s.pane, bankFocus: s.bankSel.focus });
+  if (ctx === lastCtx) return;
+  lastCtx = ctx;
+  if (ctxTimer) clearTimeout(ctxTimer);
+  ctxTimer = setTimeout(() => {
+    try {
+      void api().setSetting("uiContext", ctx).catch(() => {});
+    } catch {
+      /* backend not ready */
+    }
+  }, 600);
+});

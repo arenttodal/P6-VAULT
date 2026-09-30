@@ -31,13 +31,7 @@ struct Manifest<'a> {
     slots: Vec<String>,
 }
 
-pub fn write_backup(
-    vault: &Vault,
-    session_id: &str,
-    snapshot_id: &str,
-    transport_profile: serde_json::Value,
-    simulator: bool,
-) -> DResult<BackupInfo> {
+pub fn write_backup(vault: &Vault, session_id: &str, snapshot_id: &str, transport_profile: serde_json::Value, simulator: bool) -> DResult<BackupInfo> {
     let snap = vault.snapshot(snapshot_id)?;
     if !snap.sealed {
         return Err(DeployError::BackupFailed("snapshot is not complete".into()));
@@ -45,22 +39,15 @@ pub fn write_backup(
     let payloads: Vec<Payload> = vault.snapshot_payloads(snapshot_id)?;
     let bank: Vec<Option<Payload>> = payloads.iter().cloned().map(Some).collect();
     let bytes = bank_bytes(&bank).map_err(|e| DeployError::BackupFailed(e.to_string()))?;
-    let base = format!(
-        "P6-backup-{}-{}",
-        crate::util::file_timestamp(snap.captured_end_ms),
-        &session_id[..8]
-    );
+    let base = format!("P6-backup-{}-{}", crate::util::file_timestamp(snap.captured_end_ms), &session_id[..8]);
     let dir = vault.backups_dir();
     std::fs::create_dir_all(&dir).map_err(|e| DeployError::BackupFailed(e.to_string()))?;
     let syx = dir.join(format!("{base}.syx"));
     let man = dir.join(format!("{base}.json"));
     if syx.exists() || man.exists() {
-        return Err(DeployError::BackupFailed(
-            "backup file name collision".into(),
-        ));
+        return Err(DeployError::BackupFailed("backup file name collision".into()));
     }
-    write_verified(&syx, &bytes, &bank_expected(&bank))
-        .map_err(|e| DeployError::BackupFailed(e.to_string()))?;
+    write_verified(&syx, &bytes, &bank_expected(&bank)).map_err(|e| DeployError::BackupFailed(e.to_string()))?;
     let file_hash = crate::library::import::file_hash(&bytes);
     let manifest = Manifest {
         app: "P6 Vault",
@@ -78,11 +65,6 @@ pub fn write_backup(
         slots: payloads.iter().map(|p| p.exact_hash()).collect(),
     };
     let json = serde_json::to_vec_pretty(&manifest).unwrap();
-    write_verified(&man, &json, &crate::library::export::Expected::Raw)
-        .map_err(|e| DeployError::BackupFailed(e.to_string()))?;
-    Ok(BackupInfo {
-        syx_path: syx,
-        manifest_path: man,
-        file_hash,
-    })
+    write_verified(&man, &json, &crate::library::export::Expected::Raw).map_err(|e| DeployError::BackupFailed(e.to_string()))?;
+    Ok(BackupInfo { syx_path: syx, manifest_path: man, file_hash })
 }

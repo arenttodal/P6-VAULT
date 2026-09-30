@@ -50,10 +50,7 @@ pub fn unpack(packed: &[u8]) -> Result<Unpacked, UnpackError> {
     let mut offset = 0;
     for group in packed.chunks(8) {
         if let Some((i, &v)) = group.iter().enumerate().find(|(_, &v)| v & 0x80 != 0) {
-            return Err(UnpackError::HighBit {
-                offset: offset + i,
-                value: v,
-            });
+            return Err(UnpackError::HighBit { offset: offset + i, value: v });
         }
         let prefix = group[0];
         let data = &group[1..];
@@ -119,10 +116,7 @@ mod tests {
 
     #[test]
     fn rejects_high_bit() {
-        assert!(matches!(
-            unpack(&[0x00, 0x80]),
-            Err(UnpackError::HighBit { offset: 1, .. })
-        ));
+        assert!(matches!(unpack(&[0x00, 0x80]), Err(UnpackError::HighBit { offset: 1, .. })));
     }
 
     #[test]

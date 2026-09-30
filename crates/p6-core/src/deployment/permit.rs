@@ -11,18 +11,8 @@ pub struct ConfirmedWritePermit {
 }
 
 impl ConfirmedWritePermit {
-    pub(crate) fn new(
-        session_id: String,
-        plan_hash: String,
-        workspace_revision: i64,
-        epoch: u64,
-    ) -> Self {
-        Self {
-            session_id,
-            plan_hash,
-            workspace_revision,
-            epoch,
-        }
+    pub(crate) fn new(session_id: String, plan_hash: String, workspace_revision: i64, epoch: u64) -> Self {
+        Self { session_id, plan_hash, workspace_revision, epoch }
     }
     pub fn session_id(&self) -> &str {
         &self.session_id

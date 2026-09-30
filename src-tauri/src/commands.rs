@@ -13,9 +13,7 @@ use p6_core::protocol::payload::Payload;
 use p6_core::simulator::SimulatedP6;
 use p6_core::slot::UserSlot;
 use p6_core::storage::journal::{WriteSessionRow, WriteStepRow};
-use p6_core::storage::library::{
-    ClassificationDetail, ImportSummary, OccurrenceRow, ProtectedBuffer, SourceRow,
-};
+use p6_core::storage::library::{ClassificationDetail, ImportSummary, OccurrenceRow, ProtectedBuffer, SourceRow};
 use p6_core::storage::snapshots::SnapshotRow;
 use p6_core::storage::workspace::{MetaOp, OpPreview, WorkspaceOp, WorkspaceRow, WorkspaceView};
 use p6_core::workspace::reconcile::ConflictChoice;
@@ -52,11 +50,7 @@ pub fn app_info(state: State<AppState>) -> ApiResult<AppInfo> {
 }
 
 #[tauri::command]
-pub fn set_simulator_mode(
-    app: AppHandle,
-    state: State<AppState>,
-    enabled: bool,
-) -> ApiResult<ConnectionStatus> {
+pub fn set_simulator_mode(app: AppHandle, state: State<AppState>, enabled: bool) -> ApiResult<ConnectionStatus> {
     state.switch_mode(enabled)?;
     let st = state.status();
     let _ = app.emit("connection", &st);
@@ -104,54 +98,26 @@ fn finish_connect(
     let probe = dev.probe()?;
     let description = dev.description();
     let actor = spawn_actor(app, dev);
-    *state.conn.lock().unwrap() = Some(Connection {
-        actor,
-        epoch,
-        kind,
-        description,
-        ports,
-        probe,
-        buffer_protected: false,
-    });
+    *state.conn.lock().unwrap() = Some(Connection { actor, epoch, kind, description, ports, probe, buffer_protected: false });
     let st = state.status();
     let _ = app.emit("connection", &st);
     Ok(st)
 }
 
 #[tauri::command]
-pub async fn connect(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    input: String,
-    output: String,
-    din: bool,
-) -> ApiResult<ConnectionStatus> {
+pub async fn connect(app: AppHandle, state: State<'_, AppState>, input: String, output: String, din: bool) -> ApiResult<ConnectionStatus> {
     if state.is_simulator() {
-        return Err(ApiError::new(
-            "Invalid",
-            "Turn off Simulator mode to connect real hardware.",
-        ));
+        return Err(ApiError::new("Invalid", "Turn off Simulator mode to connect real hardware."));
     }
-    let t = midi::MidirTransport::open(&input, &output, din)
-        .map_err(|e| ApiError::new("MidiError", e))?;
-    let kind = if din {
-        TransportKind::Din
-    } else {
-        TransportKind::Usb
-    };
+    let t = midi::MidirTransport::open(&input, &output, din).map_err(|e| ApiError::new("MidiError", e))?;
+    let kind = if din { TransportKind::Din } else { TransportKind::Usb };
     finish_connect(&app, &state, Box::new(t), kind, Some((input, output)))
 }
 
 #[tauri::command]
-pub async fn connect_simulator(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> ApiResult<ConnectionStatus> {
+pub async fn connect_simulator(app: AppHandle, state: State<'_, AppState>) -> ApiResult<ConnectionStatus> {
     if !state.is_simulator() {
-        return Err(ApiError::new(
-            "Invalid",
-            "Enable Simulator mode first. The simulator uses a separate library.",
-        ));
+        return Err(ApiError::new("Invalid", "Enable Simulator mode first. The simulator uses a separate library."));
     }
     let _ = std::fs::create_dir_all(state.sim_dir());
     let sim = SimulatedP6::persistent(state.sim_dir().join("simulated-p6-memory.syx"));
@@ -160,17 +126,8 @@ pub async fn connect_simulator(
 
 #[tauri::command]
 pub fn disconnect(app: AppHandle, state: State<AppState>) -> ApiResult<ConnectionStatus> {
-    if state
-        .busy
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|b| b.1 == "write")
-    {
-        return Err(ApiError::new(
-            "Busy",
-            "A write is in progress. Stop it first.",
-        ));
+    if state.busy.lock().unwrap().as_ref().is_some_and(|b| b.1 == "write") {
+        return Err(ApiError::new("Busy", "A write is in progress. Stop it first."));
     }
     state.disconnect();
     let st = state.status();
@@ -181,21 +138,13 @@ pub fn disconnect(app: AppHandle, state: State<AppState>) -> ApiResult<Connectio
 /// Periodic liveness check for hardware ports (CoreMIDI removes unplugged endpoints).
 #[tauri::command]
 pub fn check_ports(app: AppHandle, state: State<AppState>) -> ConnectionStatus {
-    let ports = state
-        .conn
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|c| c.ports.clone());
+    let ports = state.conn.lock().unwrap().as_ref().and_then(|c| c.ports.clone());
     if let Some((i, o)) = ports {
         if state.busy.lock().unwrap().is_none() && !midi::ports_present(&i, &o) {
             state.disconnect();
             let st = state.status();
             let _ = app.emit("connection", &st);
-            return ConnectionStatus {
-                state: "Disconnected".into(),
-                ..st
-            };
+            return ConnectionStatus { state: "Disconnected".into(), ..st };
         }
     }
     state.status()
@@ -228,16 +177,10 @@ pub struct ImportPreviewDto {
 }
 
 #[tauri::command]
-pub async fn preview_imports(
-    state: State<'_, AppState>,
-    paths: Vec<String>,
-) -> ApiResult<Vec<ImportPreviewDto>> {
+pub async fn preview_imports(state: State<'_, AppState>, paths: Vec<String>) -> ApiResult<Vec<ImportPreviewDto>> {
     let mut out = Vec::new();
     for path in paths {
-        let file_name = PathBuf::from(&path)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.clone());
+        let file_name = PathBuf::from(&path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
         let empty = |e: ApiError| ImportPreviewDto {
             token: String::new(),
             path: path.clone(),
@@ -262,18 +205,11 @@ pub async fn preview_imports(
             }
         };
         if meta.len() as usize > p6_core::library::import::MAX_IMPORT_BYTES {
-            out.push(empty(ApiError::new(
-                "UnsupportedFormat",
-                "File is larger than 32 MiB.",
-            )));
+            out.push(empty(ApiError::new("UnsupportedFormat", "File is larger than 32 MiB.")));
             continue;
         }
         let lower = file_name.to_lowercase();
-        if lower.ends_with(".p6lib")
-            || lower.ends_with(".p6program")
-            || lower.ends_with(".mid")
-            || lower.ends_with(".midi")
-        {
+        if lower.ends_with(".p6lib") || lower.ends_with(".p6program") || lower.ends_with(".mid") || lower.ends_with(".midi") {
             out.push(empty(ApiError::new(
                 "UnsupportedFormat",
                 "This format is not supported. Export the sounds as a standard Prophet-6 .syx file (e.g. from SoundTower or by dumping from the synth) and import that.",
@@ -307,14 +243,7 @@ pub async fn preview_imports(
                     noncanonical: p.occurrences.iter().filter(|o| o.noncanonical).count(),
                     error: None,
                 };
-                state.previews.lock().unwrap().insert(
-                    token,
-                    PendingImport {
-                        preview: p,
-                        bytes,
-                        path,
-                    },
-                );
+                state.previews.lock().unwrap().insert(token, PendingImport { preview: p, bytes, path });
                 out.push(dto);
             }
             Err(e) => out.push(empty(ApiError::new("UnsupportedFormat", e.to_string()))),
@@ -331,37 +260,18 @@ pub struct CommitResult {
 }
 
 #[tauri::command]
-pub async fn commit_imports(
-    state: State<'_, AppState>,
-    tokens: Vec<String>,
-) -> ApiResult<Vec<CommitResult>> {
+pub async fn commit_imports(state: State<'_, AppState>, tokens: Vec<String>) -> ApiResult<Vec<CommitResult>> {
     let mut out = Vec::new();
     for t in tokens {
         let pending = state.previews.lock().unwrap().remove(&t);
         let Some(p) = pending else {
-            out.push(CommitResult {
-                token: t,
-                summary: None,
-                error: Some(ApiError::new("NotFound", "Preview expired; import again.")),
-            });
+            out.push(CommitResult { token: t, summary: None, error: Some(ApiError::new("NotFound", "Preview expired; import again.")) });
             continue;
         };
-        let r = state
-            .vault()
-            .lock()
-            .unwrap()
-            .commit_import(&p.preview, Some(&p.path), &p.bytes);
+        let r = state.vault().lock().unwrap().commit_import(&p.preview, Some(&p.path), &p.bytes);
         out.push(match r {
-            Ok(s) => CommitResult {
-                token: t,
-                summary: Some(s),
-                error: None,
-            },
-            Err(e) => CommitResult {
-                token: t,
-                summary: None,
-                error: Some(e.into()),
-            },
+            Ok(s) => CommitResult { token: t, summary: Some(s), error: None },
+            Err(e) => CommitResult { token: t, summary: None, error: Some(e.into()) },
         });
     }
     Ok(out)
@@ -386,15 +296,8 @@ pub async fn list_occurrences(state: State<'_, AppState>) -> ApiResult<Vec<Occur
 }
 
 #[tauri::command]
-pub fn classification_detail(
-    state: State<AppState>,
-    blob_hash: String,
-) -> ApiResult<ClassificationDetail> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .classification_detail(&blob_hash)?)
+pub fn classification_detail(state: State<AppState>, blob_hash: String) -> ApiResult<ClassificationDetail> {
+    Ok(state.vault().lock().unwrap().classification_detail(&blob_hash)?)
 }
 
 // ---------------------------------------------------------------- workspaces
@@ -405,46 +308,23 @@ pub fn list_workspaces(state: State<AppState>) -> ApiResult<Vec<WorkspaceRow>> {
 }
 
 #[tauri::command]
-pub async fn workspace_view(
-    state: State<'_, AppState>,
-    workspace_id: String,
-) -> ApiResult<WorkspaceView> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .workspace_view(&workspace_id)?)
+pub async fn workspace_view(state: State<'_, AppState>, workspace_id: String) -> ApiResult<WorkspaceView> {
+    Ok(state.vault().lock().unwrap().workspace_view(&workspace_id)?)
 }
 
 #[tauri::command]
 pub fn set_active_workspace(state: State<AppState>, workspace_id: String) -> ApiResult<()> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .set_active_workspace(&workspace_id)?)
+    Ok(state.vault().lock().unwrap().set_active_workspace(&workspace_id)?)
 }
 
 #[tauri::command]
-pub fn create_workspace_from_source(
-    state: State<AppState>,
-    source_id: String,
-    name: String,
-) -> ApiResult<String> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .create_workspace_from_source(&source_id, &name)?)
+pub fn create_workspace_from_source(state: State<AppState>, source_id: String, name: String) -> ApiResult<String> {
+    Ok(state.vault().lock().unwrap().create_workspace_from_source(&source_id, &name)?)
 }
 
 #[tauri::command]
 pub fn create_empty_workspace(state: State<AppState>, name: String) -> ApiResult<String> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .create_workspace(&name, None, None)?)
+    Ok(state.vault().lock().unwrap().create_workspace(&name, None, None)?)
 }
 
 #[tauri::command]
@@ -453,64 +333,30 @@ pub fn list_snapshots(state: State<AppState>) -> ApiResult<Vec<SnapshotRow>> {
 }
 
 #[tauri::command]
-pub async fn preview_op(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    op: WorkspaceOp,
-) -> ApiResult<OpPreview> {
+pub async fn preview_op(state: State<'_, AppState>, workspace_id: String, op: WorkspaceOp) -> ApiResult<OpPreview> {
     let op = resolve_paste(&state, op)?;
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .preview_op(&workspace_id, &op)?)
+    Ok(state.vault().lock().unwrap().preview_op(&workspace_id, &op)?)
 }
 
 fn resolve_paste(state: &AppState, op: WorkspaceOp) -> ApiResult<WorkspaceOp> {
     Ok(match op {
         WorkspaceOp::Paste { start, clipboard } if clipboard.is_empty() => {
-            let c = state
-                .clipboard
-                .lock()
-                .unwrap()
-                .clone()
-                .ok_or_else(|| ApiError::new("Invalid", "Nothing has been copied."))?;
-            WorkspaceOp::Paste {
-                start,
-                clipboard: c,
-            }
+            let c = state.clipboard.lock().unwrap().clone().ok_or_else(|| ApiError::new("Invalid", "Nothing has been copied."))?;
+            WorkspaceOp::Paste { start, clipboard: c }
         }
         other => other,
     })
 }
 
 #[tauri::command]
-pub async fn apply_op(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    revision: i64,
-    op: WorkspaceOp,
-) -> ApiResult<i64> {
+pub async fn apply_op(state: State<'_, AppState>, workspace_id: String, revision: i64, op: WorkspaceOp) -> ApiResult<i64> {
     let op = resolve_paste(&state, op)?;
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .apply_op(&workspace_id, revision, &op)?)
+    Ok(state.vault().lock().unwrap().apply_op(&workspace_id, revision, &op)?)
 }
 
 #[tauri::command]
-pub async fn apply_meta(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    revision: i64,
-    op: MetaOp,
-) -> ApiResult<i64> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .apply_meta(&workspace_id, revision, &op)?)
+pub async fn apply_meta(state: State<'_, AppState>, workspace_id: String, revision: i64, op: MetaOp) -> ApiResult<i64> {
+    Ok(state.vault().lock().unwrap().apply_meta(&workspace_id, revision, &op)?)
 }
 
 #[tauri::command]
@@ -519,29 +365,13 @@ pub fn preview_labels(state: State<AppState>, op: MetaOp) -> ApiResult<Vec<(Stri
 }
 
 #[tauri::command]
-pub async fn undo(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    revision: i64,
-) -> ApiResult<i64> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .undo(&workspace_id, revision)?)
+pub async fn undo(state: State<'_, AppState>, workspace_id: String, revision: i64) -> ApiResult<i64> {
+    Ok(state.vault().lock().unwrap().undo(&workspace_id, revision)?)
 }
 
 #[tauri::command]
-pub async fn redo(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    revision: i64,
-) -> ApiResult<i64> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .redo(&workspace_id, revision)?)
+pub async fn redo(state: State<'_, AppState>, workspace_id: String, revision: i64) -> ApiResult<i64> {
+    Ok(state.vault().lock().unwrap().redo(&workspace_id, revision)?)
 }
 
 #[derive(Deserialize)]
@@ -559,12 +389,7 @@ pub fn copy_programs(state: State<AppState>, items: Vec<ClipRef>) -> ApiResult<u
     let v = state.vault();
     let v = v.lock().unwrap();
     let n = items.len();
-    let bundle = v.make_clipboard(
-        &items
-            .into_iter()
-            .map(|i| (i.blob_hash, i.occurrence_id))
-            .collect::<Vec<_>>(),
-    );
+    let bundle = v.make_clipboard(&items.into_iter().map(|i| (i.blob_hash, i.occurrence_id)).collect::<Vec<_>>());
     *state.clipboard.lock().unwrap() = Some(bundle);
     Ok(n)
 }
@@ -584,16 +409,8 @@ pub fn clipboard_count(state: State<AppState>) -> usize {
 // ---------------------------------------------------------------- export
 
 #[tauri::command]
-pub async fn export_bank(
-    state: State<'_, AppState>,
-    workspace_id: String,
-    path: String,
-) -> ApiResult<usize> {
-    let bank = state
-        .vault()
-        .lock()
-        .unwrap()
-        .staged_payloads(&workspace_id)?;
+pub async fn export_bank(state: State<'_, AppState>, workspace_id: String, path: String) -> ApiResult<usize> {
+    let bank = state.vault().lock().unwrap().staged_payloads(&workspace_id)?;
     let bytes = export::bank_bytes(&bank)?;
     export::write_verified(&PathBuf::from(&path), &bytes, &export::bank_expected(&bank))?;
     Ok(bytes.len())
@@ -606,22 +423,13 @@ pub struct SelectionItem {
 }
 
 #[tauri::command]
-pub async fn export_selection(
-    state: State<'_, AppState>,
-    items: Vec<SelectionItem>,
-    path: String,
-) -> ApiResult<usize> {
+pub async fn export_selection(state: State<'_, AppState>, items: Vec<SelectionItem>, path: String) -> ApiResult<usize> {
     let v = state.vault();
     let v = v.lock().unwrap();
     let list: Vec<(UserSlot, Payload)> = items
         .iter()
         .map(|i| {
-            let s = UserSlot::new(i.slot).ok_or_else(|| {
-                ApiError::new(
-                    "InvalidDestination",
-                    format!("{} is not a user slot (000-499)", i.slot),
-                )
-            })?;
+            let s = UserSlot::new(i.slot).ok_or_else(|| ApiError::new("InvalidDestination", format!("{} is not a user slot (000-499)", i.slot)))?;
             Ok((s, v.payload(&i.blob_hash)?))
         })
         .collect::<ApiResult<_>>()?;
@@ -632,11 +440,7 @@ pub async fn export_selection(
 }
 
 #[tauri::command]
-pub async fn export_source(
-    state: State<'_, AppState>,
-    source_id: String,
-    path: String,
-) -> ApiResult<usize> {
+pub async fn export_source(state: State<'_, AppState>, source_id: String, path: String) -> ApiResult<usize> {
     let (_, archive) = state.vault().lock().unwrap().source_archive(&source_id)?;
     let bytes = std::fs::read(&archive).map_err(|e| ApiError::new("Io", e.to_string()))?;
     let dest = PathBuf::from(&path);
@@ -648,11 +452,7 @@ pub async fn export_source(
 }
 
 #[tauri::command]
-pub async fn export_edit_buffer(
-    state: State<'_, AppState>,
-    blob_hash: String,
-    path: String,
-) -> ApiResult<usize> {
+pub async fn export_edit_buffer(state: State<'_, AppState>, blob_hash: String, path: String) -> ApiResult<usize> {
     let p = state.vault().lock().unwrap().payload(&blob_hash)?;
     let bytes = export::edit_buffer_bytes(&p);
     export::write_verified(&PathBuf::from(&path), &bytes, &Expected::EditBuffer(p))?;
@@ -679,15 +479,7 @@ struct DoneEvent {
     error: Option<ApiError>,
 }
 
-type OpFn = Box<
-    dyn FnOnce(
-            &mut Device,
-            Arc<Mutex<p6_core::storage::Vault>>,
-            &AtomicBool,
-            &dyn Fn(Progress),
-        ) -> ApiResult<serde_json::Value>
-        + Send,
->;
+type OpFn = Box<dyn FnOnce(&mut Device, Arc<Mutex<p6_core::storage::Vault>>, &AtomicBool, &dyn Fn(Progress)) -> ApiResult<serde_json::Value> + Send>;
 
 /// Run an exclusive MIDI transaction in the background. Auditions are blocked and
 /// purged for its duration; progress and completion are emitted as events.
@@ -702,11 +494,7 @@ fn start_op(app: &AppHandle, state: &AppState, kind: &str, f: OpFn) -> ApiResult
         *b = Some((op_id.clone(), kind.to_string()));
         drop(b);
         let cancel = Arc::new(AtomicBool::new(false));
-        state
-            .cancels
-            .lock()
-            .unwrap()
-            .insert(op_id.clone(), cancel.clone());
+        state.cancels.lock().unwrap().insert(op_id.clone(), cancel.clone());
         actor.set_audition_blocked(true);
         let vault = state.vault();
         let app2 = app.clone();
@@ -724,15 +512,7 @@ fn start_op(app: &AppHandle, state: &AppState, kind: &str, f: OpFn) -> ApiResult
                     // Throttle rendering; always send completion-ish updates.
                     if l.elapsed() > Duration::from_millis(60) || p.slot.is_none() {
                         *l = std::time::Instant::now();
-                        let _ = app3.emit(
-                            "op-progress",
-                            ProgressEvent {
-                                op_id: op3.clone(),
-                                kind: kind3.clone(),
-                                epoch,
-                                progress: p,
-                            },
-                        );
+                        let _ = app3.emit("op-progress", ProgressEvent { op_id: op3.clone(), kind: kind3.clone(), epoch, progress: p });
                     }
                 };
                 f(dev, vault, &cancel, &progress)
@@ -742,20 +522,8 @@ fn start_op(app: &AppHandle, state: &AppState, kind: &str, f: OpFn) -> ApiResult
             *st.busy.lock().unwrap() = None;
             st.cancels.lock().unwrap().remove(&op2);
             let ev = match result {
-                Ok(v) => DoneEvent {
-                    op_id: op2,
-                    kind: kind2,
-                    ok: true,
-                    result: Some(v),
-                    error: None,
-                },
-                Err(e) => DoneEvent {
-                    op_id: op2,
-                    kind: kind2,
-                    ok: false,
-                    result: None,
-                    error: Some(e),
-                },
+                Ok(v) => DoneEvent { op_id: op2, kind: kind2, ok: true, result: Some(v), error: None },
+                Err(e) => DoneEvent { op_id: op2, kind: kind2, ok: false, result: None, error: Some(e) },
             };
             let _ = app2.emit("op-done", ev);
             let _ = app2.emit("connection", st.status());
@@ -787,25 +555,14 @@ struct SyncResult {
 /// Sync Current P6: read all 500 user slots. A fresh workspace is created from the first
 /// complete read; an existing workspace is reconciled (auto-applied only if no choices).
 #[tauri::command]
-pub fn sync_start(
-    app: AppHandle,
-    state: State<AppState>,
-    retry_session: Option<String>,
-) -> ApiResult<String> {
+pub fn sync_start(app: AppHandle, state: State<AppState>, retry_session: Option<String>) -> ApiResult<String> {
     start_op(
         &app,
         &state,
         "sync",
         Box::new(move |dev, vault, cancel, progress| {
-            let read =
-                sync::read_bank(dev, &vault, retry_session, "sync", "live", cancel, progress)?;
-            let mut res = SyncResult {
-                read: read.clone(),
-                workspace_id: None,
-                created_workspace: false,
-                rebased: false,
-                reconcile: vec![],
-            };
+            let read = sync::read_bank(dev, &vault, retry_session, "sync", "live", cancel, progress)?;
+            let mut res = SyncResult { read: read.clone(), workspace_id: None, created_workspace: false, rebased: false, reconcile: vec![] };
             if let Some(snap) = &read.snapshot_id {
                 let mut v = vault.lock().unwrap();
                 match v.active_workspace()? {
@@ -819,8 +576,7 @@ pub fn sync_start(
                         let needs_choice = slots.iter().any(|s| {
                             matches!(
                                 s.resolution,
-                                p6_core::workspace::reconcile::SlotResolution::Conflict
-                                    | p6_core::workspace::reconcile::SlotResolution::EmptyStaged
+                                p6_core::workspace::reconcile::SlotResolution::Conflict | p6_core::workspace::reconcile::SlotResolution::EmptyStaged
                             )
                         });
                         if !needs_choice {
@@ -846,20 +602,11 @@ pub async fn apply_rebase(
     snapshot_id: String,
     choices: HashMap<usize, ConflictChoice>,
 ) -> ApiResult<i64> {
-    Ok(state.vault().lock().unwrap().apply_rebase(
-        &workspace_id,
-        revision,
-        &snapshot_id,
-        &choices,
-    )?)
+    Ok(state.vault().lock().unwrap().apply_rebase(&workspace_id, revision, &snapshot_id, &choices)?)
 }
 
 #[tauri::command]
-pub fn prepare_review(
-    app: AppHandle,
-    state: State<AppState>,
-    workspace_id: String,
-) -> ApiResult<String> {
+pub fn prepare_review(app: AppHandle, state: State<AppState>, workspace_id: String) -> ApiResult<String> {
     start_op(
         &app,
         &state,
@@ -881,12 +628,7 @@ pub fn cancel_review(state: State<AppState>, session_id: String) -> ApiResult<()
 /// The user's explicit "Write N programs". The permit is created and consumed inside the
 /// MIDI actor; it never crosses IPC. Epoch mismatch (reconnect) invalidates it.
 #[tauri::command]
-pub fn write_confirmed(
-    app: AppHandle,
-    state: State<AppState>,
-    session_id: String,
-    plan_hash: String,
-) -> ApiResult<String> {
+pub fn write_confirmed(app: AppHandle, state: State<AppState>, session_id: String, plan_hash: String) -> ApiResult<String> {
     start_op(
         &app,
         &state,
@@ -905,19 +647,12 @@ pub fn list_write_sessions(state: State<AppState>) -> ApiResult<Vec<WriteSession
 }
 
 #[tauri::command]
-pub fn write_session_steps(
-    state: State<AppState>,
-    session_id: String,
-) -> ApiResult<Vec<WriteStepRow>> {
+pub fn write_session_steps(state: State<AppState>, session_id: String) -> ApiResult<Vec<WriteStepRow>> {
     Ok(state.vault().lock().unwrap().write_steps(&session_id)?)
 }
 
 #[tauri::command]
-pub fn inspect_session(
-    app: AppHandle,
-    state: State<AppState>,
-    session_id: String,
-) -> ApiResult<String> {
+pub fn inspect_session(app: AppHandle, state: State<AppState>, session_id: String) -> ApiResult<String> {
     let app2 = app.clone();
     start_op(
         &app,
@@ -926,11 +661,7 @@ pub fn inspect_session(
         Box::new(move |dev, vault, cancel, progress| {
             let r = recovery::inspect(dev, &vault, &session_id, cancel, progress)?;
             let json = serde_json::to_value(&r).unwrap();
-            app2.state::<AppState>()
-                .reports
-                .lock()
-                .unwrap()
-                .insert(session_id.clone(), r);
+            app2.state::<AppState>().reports.lock().unwrap().insert(session_id.clone(), r);
             Ok(json)
         }),
     )
@@ -943,12 +674,7 @@ fn stored_report(state: &AppState, session_id: &str) -> ApiResult<recovery::Insp
         .unwrap()
         .get(session_id)
         .cloned()
-        .ok_or_else(|| {
-            ApiError::new(
-                "Invalid",
-                "Inspect the interrupted write first (with the synth connected).",
-            )
-        })
+        .ok_or_else(|| ApiError::new("Invalid", "Inspect the interrupted write first (with the synth connected)."))
 }
 
 #[tauri::command]
@@ -967,39 +693,21 @@ pub fn recovery_rebase(
 }
 
 #[tauri::command]
-pub fn recovery_restore(
-    state: State<AppState>,
-    session_id: String,
-) -> ApiResult<recovery::RecoveryResult> {
+pub fn recovery_restore(state: State<AppState>, session_id: String) -> ApiResult<recovery::RecoveryResult> {
     let report = stored_report(&state, &session_id)?;
     let r = recovery::restore_affected(&state.vault(), &report)?;
     if let recovery::RecoveryResult::RestoreWorkspace { workspace_id, .. } = &r {
-        state
-            .vault()
-            .lock()
-            .unwrap()
-            .set_active_workspace(workspace_id)?;
+        state.vault().lock().unwrap().set_active_workspace(workspace_id)?;
     }
     state.reports.lock().unwrap().remove(&session_id);
     Ok(r)
 }
 
 #[tauri::command]
-pub fn stage_backup_restore(
-    state: State<AppState>,
-    backup_snapshot_id: String,
-) -> ApiResult<String> {
+pub fn stage_backup_restore(state: State<AppState>, backup_snapshot_id: String) -> ApiResult<String> {
     let v = state.vault();
-    let active = v
-        .lock()
-        .unwrap()
-        .active_workspace()?
-        .ok_or_else(|| ApiError::new("Invalid", "Sync with the synth first."))?;
-    let base = v
-        .lock()
-        .unwrap()
-        .workspace_baseline(&active)?
-        .ok_or_else(|| ApiError::new("Invalid", "Sync with the synth first."))?;
+    let active = v.lock().unwrap().active_workspace()?.ok_or_else(|| ApiError::new("Invalid", "Sync with the synth first."))?;
+    let base = v.lock().unwrap().workspace_baseline(&active)?.ok_or_else(|| ApiError::new("Invalid", "Sync with the synth first."))?;
     let ws = recovery::stage_backup_restore(&v, &backup_snapshot_id, &base)?;
     v.lock().unwrap().set_active_workspace(&ws)?;
     Ok(ws)
@@ -1021,46 +729,24 @@ pub struct AuditionAck {
 }
 
 #[tauri::command]
-pub fn audition(
-    state: State<AppState>,
-    target: AuditionTarget,
-    force: bool,
-) -> ApiResult<AuditionAck> {
+pub fn audition(state: State<AppState>, target: AuditionTarget, force: bool) -> ApiResult<AuditionAck> {
     let AuditionTarget::Blob { blob_hash, label } = target;
     let (actor, protected) = {
         let c = state.conn.lock().unwrap();
         match &*c {
-            None => {
-                return Ok(AuditionAck {
-                    status: "offline".into(),
-                    id: 0,
-                    message: Some("Connect the synth to audition.".into()),
-                })
-            }
+            None => return Ok(AuditionAck { status: "offline".into(), id: 0, message: Some("Connect the synth to audition.".into()) }),
             Some(c) => (c.actor.clone(), c.buffer_protected),
         }
     };
     if !protected {
-        return Ok(AuditionAck {
-            status: "needs_protection".into(),
-            id: 0,
-            message: None,
-        });
+        return Ok(AuditionAck { status: "needs_protection".into(), id: 0, message: None });
     }
     let payload = state.vault().lock().unwrap().payload(&blob_hash)?;
     let id = state.audition_seq.fetch_add(1, Ordering::SeqCst);
     if !actor.audition(AuditionRequest { id, payload, label }, force) {
-        return Ok(AuditionAck {
-            status: "blocked".into(),
-            id,
-            message: Some("Auditioning is paused while the bank is being read or written.".into()),
-        });
+        return Ok(AuditionAck { status: "blocked".into(), id, message: Some("Auditioning is paused while the bank is being read or written.".into()) });
     }
-    Ok(AuditionAck {
-        status: "queued".into(),
-        id,
-        message: None,
-    })
+    Ok(AuditionAck { status: "queued".into(), id, message: None })
 }
 
 /// Capture the current edit buffer (unsaved edits) before the first audition.
@@ -1072,11 +758,7 @@ pub async fn protect_edit_buffer(state: State<'_, AppState>) -> ApiResult<Protec
     }
     let p = actor.run(|d| d.read_edit_buffer())?;
     let desc = state.status().description.unwrap_or_default();
-    let pb = state
-        .vault()
-        .lock()
-        .unwrap()
-        .protect_edit_buffer(&p, &desc)?;
+    let pb = state.vault().lock().unwrap().protect_edit_buffer(&p, &desc)?;
     if let Some(c) = state.conn.lock().unwrap().as_mut() {
         c.buffer_protected = true;
     }
@@ -1090,22 +772,14 @@ pub fn protected_buffers(state: State<AppState>) -> ApiResult<Vec<ProtectedBuffe
 
 /// Restore a protected buffer: first capture the current buffer so it isn't lost, then load (03).
 #[tauri::command]
-pub async fn restore_protected_buffer(
-    state: State<'_, AppState>,
-    id: String,
-) -> ApiResult<ProtectedBuffer> {
+pub async fn restore_protected_buffer(state: State<'_, AppState>, id: String) -> ApiResult<ProtectedBuffer> {
     let (actor, _) = state.actor()?;
     if actor.audition_blocked() {
         return Err(ApiError::new("Busy", "Wait for the current operation."));
     }
     let v = state.vault();
-    let target = v
-        .lock()
-        .unwrap()
-        .protected_buffers()?
-        .into_iter()
-        .find(|b| b.id == id)
-        .ok_or_else(|| ApiError::new("NotFound", "No such protected buffer."))?;
+    let target =
+        v.lock().unwrap().protected_buffers()?.into_iter().find(|b| b.id == id).ok_or_else(|| ApiError::new("NotFound", "No such protected buffer."))?;
     let payload = v.lock().unwrap().payload(&target.blob_hash)?;
     let current = actor.run(|d| d.read_edit_buffer())?;
     let desc = state.status().description.unwrap_or_default();
@@ -1119,10 +793,7 @@ pub async fn restore_protected_buffer(
 pub async fn test_note(state: State<'_, AppState>, channel: u8) -> ApiResult<()> {
     let (actor, _) = state.actor()?;
     if actor.audition_blocked() {
-        return Err(ApiError::new(
-            "Busy",
-            "Unavailable while reading or writing.",
-        ));
+        return Err(ApiError::new("Busy", "Unavailable while reading or writing."));
     }
     actor.run(move |d| d.note_on(channel, 60, 80))?;
     let a2 = actor.clone();
@@ -1138,13 +809,7 @@ pub async fn test_note(state: State<'_, AppState>, channel: u8) -> ApiResult<()>
 #[tauri::command]
 pub async fn panic(state: State<'_, AppState>, channel: u8) -> ApiResult<()> {
     let (actor, _) = state.actor()?;
-    if state
-        .busy
-        .lock()
-        .unwrap()
-        .as_ref()
-        .is_some_and(|b| b.1 == "write")
-    {
+    if state.busy.lock().unwrap().as_ref().is_some_and(|b| b.1 == "write") {
         return Err(ApiError::new("Busy", "Unavailable during stored writes."));
     }
     actor.run(move |d| d.panic(channel))?;
@@ -1155,29 +820,20 @@ pub async fn panic(state: State<'_, AppState>, channel: u8) -> ApiResult<()> {
 
 #[tauri::command]
 pub fn get_setting(state: State<AppState>, key: String) -> ApiResult<Option<String>> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .setting(&format!("ui.{key}"))?)
+    Ok(state.vault().lock().unwrap().setting(&format!("ui.{key}"))?)
 }
 
 #[tauri::command]
 pub fn set_setting(state: State<AppState>, key: String, value: String) -> ApiResult<()> {
-    Ok(state
-        .vault()
-        .lock()
-        .unwrap()
-        .set_setting(&format!("ui.{key}"), &value)?)
+    Ok(state.vault().lock().unwrap().set_setting(&format!("ui.{key}"), &value)?)
+}
+
+#[tauri::command]
+pub fn hardware_gate(state: State<AppState>) -> ApiResult<p6_core::storage::journal::HardwareGate> {
+    Ok(state.vault().lock().unwrap().hardware_gate()?)
 }
 
 #[tauri::command]
 pub fn backups_dir(state: State<AppState>) -> String {
-    state
-        .vault()
-        .lock()
-        .unwrap()
-        .backups_dir()
-        .to_string_lossy()
-        .into()
+    state.vault().lock().unwrap().backups_dir().to_string_lossy().into()
 }

@@ -38,14 +38,8 @@ mod tests {
     use super::*;
     #[test]
     fn table() {
-        assert_eq!(
-            resolve(Some("o"), Some("o"), "h"),
-            SlotResolution::AdoptHardware
-        );
-        assert_eq!(
-            resolve(Some("o"), Some("s"), "o"),
-            SlotResolution::KeepStaged
-        );
+        assert_eq!(resolve(Some("o"), Some("o"), "h"), SlotResolution::AdoptHardware);
+        assert_eq!(resolve(Some("o"), Some("s"), "o"), SlotResolution::KeepStaged);
         assert_eq!(resolve(Some("o"), Some("x"), "x"), SlotResolution::Agree);
         assert_eq!(resolve(Some("o"), Some("s"), "h"), SlotResolution::Conflict);
         assert_eq!(resolve(Some("o"), None, "h"), SlotResolution::EmptyStaged);

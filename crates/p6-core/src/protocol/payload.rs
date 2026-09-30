@@ -17,12 +17,7 @@ pub struct Payload(Arc<[u8; PAYLOAD_LEN]>);
 
 impl fmt::Debug for Payload {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Payload({} {})",
-            self.display_name().unwrap_or_default(),
-            &self.exact_hash()[..12]
-        )
+        write!(f, "Payload({} {})", self.display_name().unwrap_or_default(), &self.exact_hash()[..12])
     }
 }
 
@@ -62,16 +57,7 @@ impl Payload {
         if raw.iter().any(|&b| b >= 0x80) {
             return None;
         }
-        let s: String = raw
-            .iter()
-            .map(|&b| {
-                if (0x20..0x7F).contains(&b) {
-                    b as char
-                } else {
-                    ' '
-                }
-            })
-            .collect();
+        let s: String = raw.iter().map(|&b| if (0x20..0x7F).contains(&b) { b as char } else { ' ' }).collect();
         let t = s.trim_end().to_string();
         if t.trim().is_empty() {
             None
@@ -94,13 +80,8 @@ impl Payload {
     }
     /// Number of differing bytes and the first few differing offsets.
     pub fn diff(&self, other: &Payload) -> PayloadDiff {
-        let offs: Vec<usize> = (0..PAYLOAD_LEN)
-            .filter(|&i| self.0[i] != other.0[i])
-            .collect();
-        PayloadDiff {
-            count: offs.len(),
-            first_offsets: offs.into_iter().take(16).collect(),
-        }
+        let offs: Vec<usize> = (0..PAYLOAD_LEN).filter(|&i| self.0[i] != other.0[i]).collect();
+        PayloadDiff { count: offs.len(), first_offsets: offs.into_iter().take(16).collect() }
     }
 }
 
@@ -162,25 +143,14 @@ pub struct DecodedParams {
 
 impl DecodedParams {
     fn from_payload(p: &Payload) -> Self {
-        Self {
-            values: FIELDS.iter().map(|f| (f.name, p.get(f.offset))).collect(),
-        }
+        Self { values: FIELDS.iter().map(|f| (f.name, p.get(f.offset))).collect() }
     }
     pub fn raw(&self, name: &str) -> u8 {
-        self.values
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, v)| *v)
-            .unwrap_or(0)
+        self.values.iter().find(|(n, _)| *n == name).map(|(_, v)| *v).unwrap_or(0)
     }
     /// Value normalized to 0..=1 using the documented range, clamped only in the computed view.
     pub fn norm(&self, name: &str) -> f64 {
-        let max = FIELDS
-            .iter()
-            .find(|f| f.name == name)
-            .map(|f| f.max)
-            .unwrap_or(127)
-            .max(1);
+        let max = FIELDS.iter().find(|f| f.name == name).map(|f| f.max).unwrap_or(127).max(1);
         (self.raw(name) as f64 / max as f64).min(1.0)
     }
     pub fn flag(&self, name: &str) -> bool {
@@ -196,11 +166,7 @@ pub fn synthetic_payload(seed: u32, name: &str) -> Payload {
         x ^= x << 13;
         x ^= x >> 17;
         x ^= x << 5;
-        *v = if i < 105 {
-            (x % 128) as u8
-        } else {
-            (x & 0xFF) as u8
-        };
+        *v = if i < 105 { (x % 128) as u8 } else { (x & 0xFF) as u8 };
     }
     // Flags are 0/1 in the chart; keep synthetic data plausible.
     for o in [
@@ -228,10 +194,7 @@ pub fn synthetic_payload(seed: u32, name: &str) -> Payload {
 
 pub fn set_name(b: &mut [u8; PAYLOAD_LEN], name: &str) {
     let mut field = [b' '; 20];
-    for (d, s) in field
-        .iter_mut()
-        .zip(name.bytes().filter(|c| (0x20..0x7F).contains(c)))
-    {
+    for (d, s) in field.iter_mut().zip(name.bytes().filter(|c| (0x20..0x7F).contains(c))) {
         *d = s;
     }
     b[NAME_RANGE].copy_from_slice(&field);

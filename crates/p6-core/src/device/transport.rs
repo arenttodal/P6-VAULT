@@ -49,34 +49,13 @@ pub struct TransportProfile {
 
 impl TransportProfile {
     pub fn usb() -> Self {
-        Self {
-            read_timeout_ms: 2500,
-            read_retries: 2,
-            inter_request_ms: 30,
-            post_write_settle_ms: 120,
-            serial_bps: None,
-            max_write_attempts: 3,
-        }
+        Self { read_timeout_ms: 2500, read_retries: 2, inter_request_ms: 30, post_write_settle_ms: 120, serial_bps: None, max_write_attempts: 3 }
     }
     pub fn din() -> Self {
-        Self {
-            read_timeout_ms: 4000,
-            read_retries: 2,
-            inter_request_ms: 50,
-            post_write_settle_ms: 120,
-            serial_bps: Some(31250),
-            max_write_attempts: 3,
-        }
+        Self { read_timeout_ms: 4000, read_retries: 2, inter_request_ms: 50, post_write_settle_ms: 120, serial_bps: Some(31250), max_write_attempts: 3 }
     }
     pub fn simulator() -> Self {
-        Self {
-            read_timeout_ms: 500,
-            read_retries: 2,
-            inter_request_ms: 0,
-            post_write_settle_ms: 0,
-            serial_bps: None,
-            max_write_attempts: 3,
-        }
+        Self { read_timeout_ms: 500, read_retries: 2, inter_request_ms: 0, post_write_settle_ms: 0, serial_bps: None, max_write_attempts: 3 }
     }
     pub fn for_kind(k: TransportKind) -> Self {
         match k {
@@ -94,17 +73,11 @@ impl TransportProfile {
     }
     /// Rough estimate for reading `n` programs.
     pub fn estimate_read(&self, n: usize) -> Duration {
-        let per = self.wire_time(7)
-            + self.wire_time(1178)
-            + Duration::from_millis(
-                self.inter_request_ms + if self.serial_bps.is_none() { 25 } else { 0 },
-            );
+        let per = self.wire_time(7) + self.wire_time(1178) + Duration::from_millis(self.inter_request_ms + if self.serial_bps.is_none() { 25 } else { 0 });
         per * n as u32
     }
     pub fn estimate_write(&self, n: usize) -> Duration {
-        let per = self.estimate_read(2)
-            + self.wire_time(1178)
-            + Duration::from_millis(self.post_write_settle_ms);
+        let per = self.estimate_read(2) + self.wire_time(1178) + Duration::from_millis(self.post_write_settle_ms);
         per * n as u32
     }
 }

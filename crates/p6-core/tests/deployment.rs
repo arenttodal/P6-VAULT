@@ -1,9 +1,7 @@
 //! End-to-end deployment tests against the simulated Prophet-6.
 
 use p6_core::deployment::plan::{cancel_review, confirm, prepare, PrepareOutcome, Review};
-use p6_core::deployment::recovery::{
-    inspect, rebase_after_inspection, restore_affected, Observation, RecoveryResult,
-};
+use p6_core::deployment::recovery::{inspect, rebase_after_inspection, restore_affected, Observation, RecoveryResult};
 use p6_core::deployment::sync::read_bank;
 use p6_core::deployment::writer::execute;
 use p6_core::deployment::{DeployError, Progress};
@@ -44,46 +42,16 @@ fn setup() -> Env {
     let never = AtomicBool::new(false);
     let r = read_bank(&mut dev, &vault, None, "sync", "live", &never, &np).unwrap();
     let snap = r.snapshot_id.expect("complete");
-    let ws = vault
-        .lock()
-        .unwrap()
-        .create_workspace("Main", Some(&snap), None)
-        .unwrap();
-    Env {
-        _dir: dir,
-        vault,
-        sim_state,
-        ctl,
-        sim,
-        dev,
-        ws,
-    }
+    let ws = vault.lock().unwrap().create_workspace("Main", Some(&snap), None).unwrap();
+    Env { _dir: dir, vault, sim_state, ctl, sim, dev, ws }
 }
 
 fn stage_moves(e: &Env) {
     let mut v = e.vault.lock().unwrap();
     let rev = v.workspace_revision(&e.ws).unwrap();
     // Swap 0-1 with 150-151 and move 3 to 499 (shifts 4..499 down).
-    let rev = v
-        .apply_op(
-            &e.ws,
-            rev,
-            &WorkspaceOp::SwapRanges {
-                a: 0,
-                b: 150,
-                len: 2,
-            },
-        )
-        .unwrap();
-    v.apply_op(
-        &e.ws,
-        rev,
-        &WorkspaceOp::MoveToSlot {
-            slots: vec![3],
-            target: 499,
-        },
-    )
-    .unwrap();
+    let rev = v.apply_op(&e.ws, rev, &WorkspaceOp::SwapRanges { a: 0, b: 150, len: 2 }).unwrap();
+    v.apply_op(&e.ws, rev, &WorkspaceOp::MoveToSlot { slots: vec![3], target: 499 }).unwrap();
 }
 
 fn ready(o: PrepareOutcome) -> Review {
@@ -94,14 +62,7 @@ fn ready(o: PrepareOutcome) -> Review {
 }
 
 fn target_hashes(e: &Env) -> Vec<String> {
-    e.vault
-        .lock()
-        .unwrap()
-        .staged_payloads(&e.ws)
-        .unwrap()
-        .into_iter()
-        .map(|p| p.unwrap().exact_hash())
-        .collect()
+    e.vault.lock().unwrap().staged_payloads(&e.ws).unwrap().into_iter().map(|p| p.unwrap().exact_hash()).collect()
 }
 
 #[test]
@@ -119,9 +80,7 @@ fn happy_path_writes_only_changed_and_verifies() {
     {
         let mut v = e.vault.lock().unwrap();
         let rev = v.workspace_revision(&e.ws).unwrap();
-        assert!(v
-            .apply_op(&e.ws, rev, &WorkspaceOp::ResetToBaseline)
-            .is_err());
+        assert!(v.apply_op(&e.ws, rev, &WorkspaceOp::ResetToBaseline).is_err());
     }
     // backup exists and re-parses to the pre-write bank
     let bytes = std::fs::read(&review.plan.backup_syx).unwrap();
@@ -130,10 +89,7 @@ fn happy_path_writes_only_changed_and_verifies() {
     let out = execute(&mut e.dev, &e.vault, permit, &never, &np).unwrap();
     assert_eq!(out.status, "Completed", "{out:?}");
     assert_eq!(out.verified, n);
-    let bank: Vec<String> = e.sim_state.lock().unwrap().programs[..500]
-        .iter()
-        .map(|p| p.exact_hash())
-        .collect();
+    let bank: Vec<String> = e.sim_state.lock().unwrap().programs[..500].iter().map(|p| p.exact_hash()).collect();
     assert_eq!(bank, target);
     let mut s = stores(&e);
     s.sort();
@@ -152,61 +108,35 @@ fn confirm_rejects_wrong_epoch_and_hash() {
     stage_moves(&e);
     let never = AtomicBool::new(false);
     let review = ready(prepare(&mut e.dev, &e.vault, &e.ws, &never, &np).unwrap());
-    assert!(matches!(
-        confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 2),
-        Err(DeployError::InvalidPermit(_))
-    ));
-    assert!(matches!(
-        confirm(&e.vault, &review.plan.session_id, "bad", 1),
-        Err(DeployError::InvalidPermit(_))
-    ));
+    assert!(matches!(confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 2), Err(DeployError::InvalidPermit(_))));
+    assert!(matches!(confirm(&e.vault, &review.plan.session_id, "bad", 1), Err(DeployError::InvalidPermit(_))));
     cancel_review(&e.vault, &review.plan.session_id).unwrap();
     assert!(confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 1).is_err());
     assert!(stores(&e).is_empty());
     // after cancel, editing works again
     let mut v = e.vault.lock().unwrap();
     let rev = v.workspace_revision(&e.ws).unwrap();
-    v.apply_op(&e.ws, rev, &WorkspaceOp::ResetToBaseline)
-        .unwrap();
+    v.apply_op(&e.ws, rev, &WorkspaceOp::ResetToBaseline).unwrap();
 }
 
 #[test]
 fn drift_blocks_plan_and_reconciles() {
     let mut e = setup();
     stage_moves(&e);
-    e.sim
-        .external_store(250, synthetic_payload(77777, "Owner Edit"));
-    e.sim
-        .external_store(0, synthetic_payload(88888, "Owner Edit 2"));
+    e.sim.external_store(250, synthetic_payload(77777, "Owner Edit"));
+    e.sim.external_store(0, synthetic_payload(88888, "Owner Edit 2"));
     let never = AtomicBool::new(false);
     let out = prepare(&mut e.dev, &e.vault, &e.ws, &never, &np).unwrap();
-    let PrepareOutcome::Drift {
-        live_snapshot_id,
-        slots,
-        ..
-    } = out
-    else {
-        panic!("expected drift")
-    };
+    let PrepareOutcome::Drift { live_snapshot_id, slots, .. } = out else { panic!("expected drift") };
     assert!(stores(&e).is_empty());
     // slot 0 was staged (swap) and changed on hardware -> conflict; slot 250 shifted by move -> conflict too.
-    let conflicts: Vec<usize> = slots
-        .iter()
-        .filter(|s| s.resolution == p6_core::workspace::reconcile::SlotResolution::Conflict)
-        .map(|s| s.slot)
-        .collect();
+    let conflicts: Vec<usize> = slots.iter().filter(|s| s.resolution == p6_core::workspace::reconcile::SlotResolution::Conflict).map(|s| s.slot).collect();
     assert!(conflicts.contains(&0));
     let mut v = e.vault.lock().unwrap();
     let rev = v.workspace_revision(&e.ws).unwrap();
-    assert!(v
-        .apply_rebase(&e.ws, rev, &live_snapshot_id, &HashMap::new())
-        .is_err());
-    let choices = conflicts
-        .iter()
-        .map(|&s| (s, p6_core::workspace::reconcile::ConflictChoice::KeepNew))
-        .collect();
-    v.apply_rebase(&e.ws, rev, &live_snapshot_id, &choices)
-        .unwrap();
+    assert!(v.apply_rebase(&e.ws, rev, &live_snapshot_id, &HashMap::new()).is_err());
+    let choices = conflicts.iter().map(|&s| (s, p6_core::workspace::reconcile::ConflictChoice::KeepNew)).collect();
+    v.apply_rebase(&e.ws, rev, &live_snapshot_id, &choices).unwrap();
     drop(v);
     let review = ready(prepare(&mut e.dev, &e.vault, &e.ws, &never, &np).unwrap());
     assert!(review.plan.steps.iter().any(|s| s.slot == 0));
@@ -219,10 +149,7 @@ fn incomplete_backup_blocks_writes() {
     e.ctl.lock().unwrap().drop_replies = 3; // one slot never answers (3 attempts)
     let never = AtomicBool::new(false);
     let r = prepare(&mut e.dev, &e.vault, &e.ws, &never, &np);
-    assert!(
-        matches!(r, Err(DeployError::IncompleteBank { missing: 1 })),
-        "{r:?}"
-    );
+    assert!(matches!(r, Err(DeployError::IncompleteBank { missing: 1 })), "{r:?}");
     assert!(stores(&e).is_empty());
 }
 
@@ -239,26 +166,11 @@ fn mismatch_stops_and_later_slots_untouched() {
     assert_eq!(r.status, "NeedsRecovery");
     assert_eq!(r.verified, 1);
     assert_eq!(stores(&e), vec![review.plan.steps[0].slot, bad]);
-    let steps = e
-        .vault
-        .lock()
-        .unwrap()
-        .write_steps(&review.plan.session_id)
-        .unwrap();
+    let steps = e.vault.lock().unwrap().write_steps(&review.plan.session_id).unwrap();
     assert_eq!(steps[1].state, "Failed");
     assert!(steps[2..].iter().all(|s| s.state == "Planned"));
     // Baseline not advanced
-    assert_eq!(
-        e.vault
-            .lock()
-            .unwrap()
-            .workspace_view(&e.ws)
-            .unwrap()
-            .baseline
-            .unwrap()
-            .kind,
-        "live"
-    );
+    assert_eq!(e.vault.lock().unwrap().workspace_view(&e.ws).unwrap().baseline.unwrap().kind, "live");
 }
 
 #[test]
@@ -271,12 +183,7 @@ fn write_retry_when_store_does_not_land() {
     let permit = confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 1).unwrap();
     let r = execute(&mut e.dev, &e.vault, permit, &never, &np).unwrap();
     assert_eq!(r.status, "Completed");
-    let steps = e
-        .vault
-        .lock()
-        .unwrap()
-        .write_steps(&review.plan.session_id)
-        .unwrap();
+    let steps = e.vault.lock().unwrap().write_steps(&review.plan.session_id).unwrap();
     assert_eq!(steps[0].attempts, 3);
 }
 
@@ -286,11 +193,7 @@ fn persistent_non_landing_write_fails_after_three_attempts() {
     stage_moves(&e);
     let never = AtomicBool::new(false);
     let review = ready(prepare(&mut e.dev, &e.vault, &e.ws, &never, &np).unwrap());
-    e.ctl
-        .lock()
-        .unwrap()
-        .ignore_store_slots
-        .insert(review.plan.steps[0].slot);
+    e.ctl.lock().unwrap().ignore_store_slots.insert(review.plan.steps[0].slot);
     let permit = confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 1).unwrap();
     let r = execute(&mut e.dev, &e.vault, permit, &never, &np).unwrap();
     assert_eq!(r.status, "NeedsRecovery");
@@ -310,11 +213,7 @@ fn drift_during_write_stops_before_that_slot() {
     let r = execute(&mut e.dev, &e.vault, permit, &never, &np).unwrap();
     assert_eq!(r.status, "NeedsRecovery");
     assert_eq!(stores(&e).len(), 2);
-    assert_eq!(
-        e.sim_state.lock().unwrap().programs[victim as usize],
-        foreign,
-        "newer work preserved"
-    );
+    assert_eq!(e.sim_state.lock().unwrap().programs[victim as usize], foreign, "newer work preserved");
     // and it is preserved in the library
     let rows = e.vault.lock().unwrap().list_occurrences().unwrap();
     assert!(rows.iter().any(|r| r.exact_hash == foreign.exact_hash()));
@@ -359,23 +258,12 @@ fn disconnect_then_inspect_and_restore() {
     assert_eq!(e.ctl.lock().unwrap().sent.len(), sent_before);
 
     // Reconnect with a new epoch and inspect.
-    let mut dev2 = Device::new(
-        Box::new(e.sim.reconnect()),
-        TransportProfile::simulator(),
-        2,
-    );
+    let mut dev2 = Device::new(Box::new(e.sim.reconnect()), TransportProfile::simulator(), 2);
     let rep = inspect(&mut dev2, &e.vault, &review.plan.session_id, &never, &np).unwrap();
     assert_eq!(rep.matches_desired, 3);
     assert_eq!(rep.slots[3].observation, Observation::MatchesBefore);
     let res = restore_affected(&e.vault, &rep).unwrap();
-    let RecoveryResult::RestoreWorkspace {
-        workspace_id,
-        restored_slots,
-        conflicts,
-    } = res
-    else {
-        panic!()
-    };
+    let RecoveryResult::RestoreWorkspace { workspace_id, restored_slots, conflicts } = res else { panic!() };
     assert_eq!(restored_slots.len(), 3);
     assert!(conflicts.is_empty());
     // Deploy the restoration via the normal guarded flow.
@@ -385,12 +273,7 @@ fn disconnect_then_inspect_and_restore() {
     let out = execute(&mut dev2, &e.vault, permit, &never, &np).unwrap();
     assert_eq!(out.status, "Completed");
     // Hardware equals the original pre-write bank again.
-    let pre = e
-        .vault
-        .lock()
-        .unwrap()
-        .snapshot_payloads(&review.plan.prewrite_snapshot_id)
-        .unwrap();
+    let pre = e.vault.lock().unwrap().snapshot_payloads(&review.plan.prewrite_snapshot_id).unwrap();
     assert_eq!(e.sim.user_bank(), pre);
 }
 
@@ -404,23 +287,14 @@ fn continue_after_interruption() {
     e.ctl.lock().unwrap().disconnect_after_stores = Some(5);
     let permit = confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 1).unwrap();
     execute(&mut e.dev, &e.vault, permit, &never, &np).unwrap();
-    let mut dev2 = Device::new(
-        Box::new(e.sim.reconnect()),
-        TransportProfile::simulator(),
-        2,
-    );
+    let mut dev2 = Device::new(Box::new(e.sim.reconnect()), TransportProfile::simulator(), 2);
     let rep = inspect(&mut dev2, &e.vault, &review.plan.session_id, &never, &np).unwrap();
     let res = rebase_after_inspection(&e.vault, &rep, &HashMap::new(), "continued").unwrap();
     assert!(matches!(res, RecoveryResult::Rebased { .. }), "{res:?}");
     let rv = ready(prepare(&mut dev2, &e.vault, &e.ws, &never, &np).unwrap());
     assert_eq!(rv.plan.steps.len(), review.plan.steps.len() - 5);
     let permit = confirm(&e.vault, &rv.plan.session_id, &rv.plan_hash, 2).unwrap();
-    assert_eq!(
-        execute(&mut dev2, &e.vault, permit, &never, &np)
-            .unwrap()
-            .status,
-        "Completed"
-    );
+    assert_eq!(execute(&mut dev2, &e.vault, permit, &never, &np).unwrap().status, "Completed");
     let bank: Vec<String> = e.sim.user_bank().iter().map(|p| p.exact_hash()).collect();
     assert_eq!(bank, target);
 }
@@ -435,24 +309,13 @@ fn crash_after_send_intent_is_uncertain() {
     let dir = e._dir.path().to_path_buf();
     {
         let c = rusqlite::Connection::open(dir.join("vault.sqlite")).unwrap();
-        c.execute(
-            "UPDATE write_sessions SET status='Writing' WHERE id=?1",
-            [&review.plan.session_id],
-        )
-        .unwrap();
-        c.execute(
-            "UPDATE write_steps SET state='SendIntent', attempts=1 WHERE session_id=?1 AND ord=0",
-            [&review.plan.session_id],
-        )
-        .unwrap();
+        c.execute("UPDATE write_sessions SET status='Writing' WHERE id=?1", [&review.plan.session_id]).unwrap();
+        c.execute("UPDATE write_steps SET state='SendIntent', attempts=1 WHERE session_id=?1 AND ord=0", [&review.plan.session_id]).unwrap();
     }
     let mut v = Vault::open(&dir).unwrap();
     let un = v.startup_recovery_scan().unwrap();
     assert_eq!(un[0].status, "Interrupted");
-    assert_eq!(
-        v.write_steps(&review.plan.session_id).unwrap()[0].state,
-        "Uncertain"
-    );
+    assert_eq!(v.write_steps(&review.plan.session_id).unwrap()[0].state, "Uncertain");
     assert!(stores(&e).is_empty());
 }
 
@@ -469,11 +332,59 @@ fn no_stored_writes_outside_write_engine() {
         let rev = v.undo(&e.ws, rev).unwrap();
         v.redo(&e.ws, rev).unwrap();
     }
-    assert!(e
-        .ctl
-        .lock()
-        .unwrap()
-        .sent
-        .iter()
-        .all(|f| !is_stored_write(f)));
+    assert!(e.ctl.lock().unwrap().sent.iter().all(|f| !is_stored_write(f)));
+}
+
+/// Simulator presented as USB hardware, to exercise the real-hardware validation gate.
+struct AsUsb(SimulatedP6);
+impl p6_core::device::Transport for AsUsb {
+    fn send(&mut self, b: &[u8]) -> Result<(), p6_core::device::TransportError> {
+        self.0.send(b)
+    }
+    fn recv(&mut self, t: std::time::Duration) -> Result<Option<p6_core::device::RecvEvent>, p6_core::device::TransportError> {
+        self.0.recv(t)
+    }
+    fn kind(&self) -> p6_core::device::TransportKind {
+        p6_core::device::TransportKind::Usb
+    }
+    fn description(&self) -> String {
+        "fake usb".into()
+    }
+}
+
+#[test]
+fn hardware_gate_limits_first_real_writes_to_one_slot() {
+    let e = setup();
+    let mut dev = Device::new(Box::new(AsUsb(e.sim.reconnect())), TransportProfile::simulator(), 1);
+    stage_moves(&e);
+    let never = AtomicBool::new(false);
+    assert!(matches!(prepare(&mut dev, &e.vault, &e.ws, &never, &np), Err(DeployError::HardwareGate { done: 0, .. })));
+    assert!(stores(&e).is_empty());
+    // The owner designates one slot by staging exactly one change.
+    {
+        let mut v = e.vault.lock().unwrap();
+        let rev = v.workspace_revision(&e.ws).unwrap();
+        let rev = v.apply_op(&e.ws, rev, &WorkspaceOp::ResetToBaseline).unwrap();
+        let occ = v.list_occurrences().unwrap();
+        v.apply_op(&e.ws, rev, &WorkspaceOp::ReplaceFromLibrary { start: 42, occurrence_ids: vec![occ[7].id.clone()] }).unwrap();
+    }
+    let original = e.sim.user_bank()[42].clone();
+    for round in 0..2 {
+        let review = ready(prepare(&mut dev, &e.vault, &e.ws, &never, &np).unwrap());
+        assert_eq!(review.plan.steps.len(), 1);
+        let permit = confirm(&e.vault, &review.plan.session_id, &review.plan_hash, 1).unwrap();
+        assert_eq!(execute(&mut dev, &e.vault, permit, &never, &np).unwrap().status, "Completed");
+        if round == 0 {
+            // Restoration via the same guarded engine: stage the backed-up original.
+            let mut v = e.vault.lock().unwrap();
+            let rev = v.workspace_revision(&e.ws).unwrap();
+            let pre = v.snapshot_cells(&review.plan.prewrite_snapshot_id).unwrap();
+            let clip = v.make_clipboard(&[(pre[42].blob_hash.clone(), pre[42].occurrence_id.clone())]);
+            v.apply_op(&e.ws, rev, &WorkspaceOp::Paste { start: 42, clipboard: clip }).unwrap();
+        }
+    }
+    assert!(e.vault.lock().unwrap().hardware_gate().unwrap().passed);
+    assert_eq!(e.sim.user_bank()[42], original, "restored");
+    stage_moves(&e);
+    assert!(matches!(prepare(&mut dev, &e.vault, &e.ws, &never, &np).unwrap(), PrepareOutcome::Ready(_)));
 }

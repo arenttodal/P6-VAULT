@@ -62,10 +62,7 @@ impl AppState {
     pub fn new(base_dir: PathBuf) -> Result<Self, String> {
         std::fs::create_dir_all(&base_dir).map_err(|e| e.to_string())?;
         let lock = File::create(base_dir.join("p6vault.lock")).map_err(|e| e.to_string())?;
-        fs2::FileExt::try_lock_exclusive(&lock).map_err(|_| {
-            "P6 Vault is already running with this library. Close the other window first."
-                .to_string()
-        })?;
+        fs2::FileExt::try_lock_exclusive(&lock).map_err(|_| "P6 Vault is already running with this library. Close the other window first.".to_string())?;
         let mut vault = Vault::open(&base_dir).map_err(|e| e.to_string())?;
         let unfinished = vault.startup_recovery_scan().map_err(|e| e.to_string())?;
         Ok(Self {
@@ -101,17 +98,10 @@ impl AppState {
     /// connection-bound.
     pub fn switch_mode(&self, simulator: bool) -> ApiResult<()> {
         if self.busy.lock().unwrap().is_some() {
-            return Err(ApiError::new(
-                "Busy",
-                "Finish the current operation before switching modes.",
-            ));
+            return Err(ApiError::new("Busy", "Finish the current operation before switching modes."));
         }
         self.disconnect();
-        let dir = if simulator {
-            self.sim_dir()
-        } else {
-            self.base_dir.clone()
-        };
+        let dir = if simulator { self.sim_dir() } else { self.base_dir.clone() };
         let mut v = Vault::open(&dir)?;
         let unfinished = v.startup_recovery_scan()?;
         *self.vault.write().unwrap() = Arc::new(Mutex::new(v));
@@ -142,11 +132,7 @@ impl AppState {
         let busy = self.busy.lock().unwrap().as_ref().map(|b| b.1.clone());
         match &*c {
             Some(c) => ConnectionStatus {
-                state: if c.kind == TransportKind::Simulator {
-                    "Simulator".into()
-                } else {
-                    "Connected".into()
-                },
+                state: if c.kind == TransportKind::Simulator { "Simulator".into() } else { "Connected".into() },
                 epoch: c.epoch,
                 kind: Some(c.kind),
                 description: Some(c.description.clone()),
@@ -170,9 +156,7 @@ impl AppState {
 
     pub fn actor(&self) -> ApiResult<(Arc<DeviceActor>, u64)> {
         let c = self.conn.lock().unwrap();
-        let c = c
-            .as_ref()
-            .ok_or_else(|| ApiError::new("Offline", "No synth is connected."))?;
+        let c = c.as_ref().ok_or_else(|| ApiError::new("Offline", "No synth is connected."))?;
         Ok((c.actor.clone(), c.epoch))
     }
 }

@@ -39,11 +39,7 @@ pub enum MessageError {
     #[error("not a Prophet-6 message")]
     Unrelated,
     #[error("wrong length for command {command:#04x}: {len} bytes (expected {expected})")]
-    BadLength {
-        command: u8,
-        len: usize,
-        expected: usize,
-    },
+    BadLength { command: u8, len: usize, expected: usize },
     #[error("invalid program address bank {bank} program {program}")]
     BadAddress { bank: u8, program: u8 },
     #[error("packed payload is corrupt: {0}")]
@@ -51,25 +47,11 @@ pub enum MessageError {
 }
 
 pub fn request_program(addr: StoredAddress) -> Vec<u8> {
-    vec![
-        0xF0,
-        SEQUENTIAL_ID,
-        P6_MODEL_ID,
-        CMD_REQUEST_PROGRAM,
-        addr.bank,
-        addr.program,
-        0xF7,
-    ]
+    vec![0xF0, SEQUENTIAL_ID, P6_MODEL_ID, CMD_REQUEST_PROGRAM, addr.bank, addr.program, 0xF7]
 }
 
 pub fn request_edit_buffer() -> Vec<u8> {
-    vec![
-        0xF0,
-        SEQUENTIAL_ID,
-        P6_MODEL_ID,
-        CMD_REQUEST_EDIT_BUFFER,
-        0xF7,
-    ]
+    vec![0xF0, SEQUENTIAL_ID, P6_MODEL_ID, CMD_REQUEST_EDIT_BUFFER, 0xF7]
 }
 
 pub fn identity_inquiry() -> Vec<u8> {
@@ -90,14 +72,7 @@ pub fn edit_buffer_frame(payload: &Payload) -> Vec<u8> {
 /// in a file). Transmission to hardware is only possible through the guarded write engine.
 pub fn program_file_frame(addr: StoredAddress, payload: &Payload) -> Vec<u8> {
     let mut v = Vec::with_capacity(PROGRAM_FRAME_LEN);
-    v.extend([
-        0xF0,
-        SEQUENTIAL_ID,
-        P6_MODEL_ID,
-        CMD_PROGRAM_DATA,
-        addr.bank,
-        addr.program,
-    ]);
+    v.extend([0xF0, SEQUENTIAL_ID, P6_MODEL_ID, CMD_PROGRAM_DATA, addr.bank, addr.program]);
     v.extend(pack(payload.bytes()));
     v.push(0xF7);
     debug_assert_eq!(v.len(), PROGRAM_FRAME_LEN);
@@ -111,17 +86,12 @@ pub(crate) fn stored_write_frame(slot: UserSlot, payload: &Payload) -> Vec<u8> {
 
 /// True if this outgoing frame would store a program (command 02 to a P6).
 pub fn is_stored_write(frame: &[u8]) -> bool {
-    frame.len() >= 4
-        && frame[0] == 0xF0
-        && frame[1] == SEQUENTIAL_ID
-        && frame[2] == P6_MODEL_ID
-        && frame[3] == CMD_PROGRAM_DATA
+    frame.len() >= 4 && frame[0] == 0xF0 && frame[1] == SEQUENTIAL_ID && frame[2] == P6_MODEL_ID && frame[3] == CMD_PROGRAM_DATA
 }
 
 fn decode_payload(packed: &[u8]) -> Result<(Payload, bool), MessageError> {
     let u = unpack(packed).map_err(|e| MessageError::BadPacking(e.to_string()))?;
-    let p = Payload::from_slice(&u.raw)
-        .ok_or_else(|| MessageError::BadPacking(format!("unpacked {} bytes", u.raw.len())))?;
+    let p = Payload::from_slice(&u.raw).ok_or_else(|| MessageError::BadPacking(format!("unpacked {} bytes", u.raw.len())))?;
     Ok((p, u.canonical))
 }
 
@@ -142,11 +112,7 @@ pub fn parse_message(f: &[u8]) -> Result<P6Message, MessageError> {
             return Err(MessageError::Unrelated);
         }
         let version = body.iter().skip(4).copied().collect();
-        return Ok(P6Message::IdentityReply {
-            manufacturer,
-            family,
-            version,
-        });
+        return Ok(P6Message::IdentityReply { manufacturer, family, version });
     }
     if f.len() < 5 || f[1] != SEQUENTIAL_ID || f[2] != P6_MODEL_ID {
         return Err(MessageError::Unrelated);
@@ -156,29 +122,16 @@ pub fn parse_message(f: &[u8]) -> Result<P6Message, MessageError> {
         if f.len() == expected {
             Ok(())
         } else {
-            Err(MessageError::BadLength {
-                command: cmd,
-                len: f.len(),
-                expected,
-            })
+            Err(MessageError::BadLength { command: cmd, len: f.len(), expected })
         }
     };
-    let addr = |b: u8, p: u8| {
-        StoredAddress::new(b, p).ok_or(MessageError::BadAddress {
-            bank: b,
-            program: p,
-        })
-    };
+    let addr = |b: u8, p: u8| StoredAddress::new(b, p).ok_or(MessageError::BadAddress { bank: b, program: p });
     match cmd {
         CMD_PROGRAM_DATA => {
             need(PROGRAM_FRAME_LEN)?;
             let address = addr(f[4], f[5])?;
             let (payload, canonical) = decode_payload(&f[6..f.len() - 1])?;
-            Ok(P6Message::ProgramData {
-                address,
-                payload,
-                canonical,
-            })
+            Ok(P6Message::ProgramData { address, payload, canonical })
         }
         CMD_EDIT_BUFFER_DATA => {
             need(EDIT_BUFFER_FRAME_LEN)?;
@@ -187,9 +140,7 @@ pub fn parse_message(f: &[u8]) -> Result<P6Message, MessageError> {
         }
         CMD_REQUEST_PROGRAM => {
             need(7)?;
-            Ok(P6Message::ProgramRequest {
-                address: addr(f[4], f[5])?,
-            })
+            Ok(P6Message::ProgramRequest { address: addr(f[4], f[5])? })
         }
         CMD_REQUEST_EDIT_BUFFER => {
             need(5)?;
@@ -212,11 +163,7 @@ mod tests {
         assert_eq!(f.len(), 1178);
         assert_eq!(&f[..6], &[0xF0, 0x01, 0x2D, 0x02, 4, 99]);
         match parse_message(&f).unwrap() {
-            P6Message::ProgramData {
-                address,
-                payload,
-                canonical,
-            } => {
+            P6Message::ProgramData { address, payload, canonical } => {
                 assert_eq!(address, a);
                 assert_eq!(payload, p);
                 assert!(canonical);
@@ -225,20 +172,14 @@ mod tests {
         }
         let e = edit_buffer_frame(&p);
         assert_eq!(e.len(), 1176);
-        assert!(matches!(
-            parse_message(&e).unwrap(),
-            P6Message::EditBufferData { .. }
-        ));
+        assert!(matches!(parse_message(&e).unwrap(), P6Message::EditBufferData { .. }));
         assert!(!is_stored_write(&e));
         assert!(is_stored_write(&f));
     }
 
     #[test]
     fn requests() {
-        assert_eq!(
-            request_program(StoredAddress::new(1, 5).unwrap()),
-            vec![0xF0, 1, 0x2D, 5, 1, 5, 0xF7]
-        );
+        assert_eq!(request_program(StoredAddress::new(1, 5).unwrap()), vec![0xF0, 1, 0x2D, 5, 1, 5, 0xF7]);
         assert_eq!(request_edit_buffer(), vec![0xF0, 1, 0x2D, 6, 0xF7]);
         assert_eq!(identity_inquiry(), vec![0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7]);
     }
@@ -248,31 +189,18 @@ mod tests {
         let p = synthetic_payload(3, "x");
         let mut f = program_file_frame(StoredAddress::new(0, 0).unwrap(), &p);
         f.remove(10);
-        assert!(matches!(
-            parse_message(&f),
-            Err(MessageError::BadLength { .. })
-        ));
+        assert!(matches!(parse_message(&f), Err(MessageError::BadLength { .. })));
         let mut f = program_file_frame(StoredAddress::new(0, 0).unwrap(), &p);
         f[4] = 10;
-        assert!(matches!(
-            parse_message(&f),
-            Err(MessageError::BadAddress { .. })
-        ));
-        assert_eq!(
-            parse_message(&[0xF0, 0x42, 0x00, 0xF7]),
-            Err(MessageError::Unrelated)
-        );
+        assert!(matches!(parse_message(&f), Err(MessageError::BadAddress { .. })));
+        assert_eq!(parse_message(&[0xF0, 0x42, 0x00, 0xF7]), Err(MessageError::Unrelated));
     }
 
     #[test]
     fn identity_reply_variable_length() {
-        let r = [
-            0xF0, 0x7E, 0x00, 0x06, 0x02, 0x01, 0x2D, 0x01, 0x00, 0x00, 0x05, 0x01, 0xF7,
-        ];
+        let r = [0xF0, 0x7E, 0x00, 0x06, 0x02, 0x01, 0x2D, 0x01, 0x00, 0x00, 0x05, 0x01, 0xF7];
         match parse_message(&r).unwrap() {
-            P6Message::IdentityReply {
-                family, version, ..
-            } => {
+            P6Message::IdentityReply { family, version, .. } => {
                 assert_eq!(family, vec![0x2D, 0x01, 0x00, 0x00]);
                 assert_eq!(version, vec![0x05, 0x01]);
             }

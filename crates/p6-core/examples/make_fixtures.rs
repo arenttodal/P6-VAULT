@@ -40,7 +40,14 @@ fn main() {
         .collect();
     std::fs::write(format!("{dir}/synthetic-full-bank.syx"), bank_bytes(&bank).unwrap()).unwrap();
 
-    let sel: Vec<(UserSlot, Payload)> = (0..24u16).map(|i| (UserSlot::new(i).unwrap(), styled(20_000 + i as u32, &format!("TEST Old {} {i:02}", kinds[(i % 8) as usize]), &kinds[(i % 8) as usize].to_lowercase()))).collect();
+    let sel: Vec<(UserSlot, Payload)> = (0..24u16)
+        .map(|i| {
+            (
+                UserSlot::new(i).unwrap(),
+                styled(20_000 + i as u32, &format!("TEST Old {} {i:02}", kinds[(i % 8) as usize]), &kinds[(i % 8) as usize].to_lowercase()),
+            )
+        })
+        .collect();
     let mut mixed = selection_bytes(&sel).unwrap();
     mixed.extend(edit_buffer_frame(&styled(30_000, "TEST Edit Buffer", "pad")));
     mixed.extend([0xF0, 0x42, 0x30, 0x00, 0xF7]); // unrelated manufacturer

@@ -18,15 +18,8 @@ pub struct AuditionRequest {
 
 #[derive(Debug, Clone)]
 pub enum AuditionOutcome {
-    Sent {
-        id: u64,
-        label: String,
-    },
-    Failed {
-        id: u64,
-        label: String,
-        error: DeviceError,
-    },
+    Sent { id: u64, label: String },
+    Failed { id: u64, label: String, error: DeviceError },
 }
 
 struct State {
@@ -44,21 +37,9 @@ pub struct DeviceActor {
 }
 
 impl DeviceActor {
-    pub fn spawn(
-        mut device: Device,
-        on_audition: impl Fn(AuditionOutcome) + Send + 'static,
-    ) -> Self {
+    pub fn spawn(mut device: Device, on_audition: impl Fn(AuditionOutcome) + Send + 'static) -> Self {
         let epoch = device.epoch();
-        let shared = Arc::new((
-            Mutex::new(State {
-                jobs: VecDeque::new(),
-                audition: None,
-                last_sent_hash: None,
-                blocked: false,
-                stop: false,
-            }),
-            Condvar::new(),
-        ));
+        let shared = Arc::new((Mutex::new(State { jobs: VecDeque::new(), audition: None, last_sent_hash: None, blocked: false, stop: false }), Condvar::new()));
         let s2 = shared.clone();
         let handle = std::thread::Builder::new()
             .name("p6-midi-actor".into())
@@ -91,24 +72,13 @@ impl DeviceActor {
                         m.lock().unwrap().last_sent_hash = Some(a.payload.exact_hash());
                     }
                     on_audition(match r {
-                        Ok(()) => AuditionOutcome::Sent {
-                            id: a.id,
-                            label: a.label,
-                        },
-                        Err(error) => AuditionOutcome::Failed {
-                            id: a.id,
-                            label: a.label,
-                            error,
-                        },
+                        Ok(()) => AuditionOutcome::Sent { id: a.id, label: a.label },
+                        Err(error) => AuditionOutcome::Failed { id: a.id, label: a.label, error },
                     });
                 }
             })
             .expect("spawn midi actor");
-        Self {
-            shared,
-            handle: Some(handle),
-            epoch,
-        }
+        Self { shared, handle: Some(handle), epoch }
     }
 
     pub fn epoch(&self) -> u64 {
@@ -138,10 +108,7 @@ impl DeviceActor {
         if st.blocked {
             return false;
         }
-        if !force
-            && st.audition.is_none()
-            && st.last_sent_hash.as_deref() == Some(&req.payload.exact_hash())
-        {
+        if !force && st.audition.is_none() && st.last_sent_hash.as_deref() == Some(&req.payload.exact_hash()) {
             return true;
         }
         st.audition = Some(req);

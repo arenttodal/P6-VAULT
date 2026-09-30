@@ -22,12 +22,7 @@ pub fn read_bank(
 ) -> DResult<ReadSessionState> {
     let session = match session {
         Some(s) => s,
-        None => {
-            vault
-                .lock()
-                .unwrap()
-                .begin_read_session(purpose, &dev.description(), dev.epoch())?
-        }
+        None => vault.lock().unwrap().begin_read_session(purpose, &dev.description(), dev.epoch())?,
     };
     let todo: Vec<u16> = vault.lock().unwrap().read_session_state(&session)?.missing;
     let total = 500;
@@ -52,17 +47,11 @@ pub fn read_bank(
             }
             Err(e) => {
                 // Disconnect/overflow: keep what we have, report partial.
-                vault
-                    .lock()
-                    .unwrap()
-                    .finish_read_session(&session, false, kind, purpose)?;
+                vault.lock().unwrap().finish_read_session(&session, false, kind, purpose)?;
                 return Err(e.into());
             }
         }
     }
     progress(Progress::new(purpose, done, total, None));
-    Ok(vault
-        .lock()
-        .unwrap()
-        .finish_read_session(&session, cancelled, kind, purpose)?)
+    Ok(vault.lock().unwrap().finish_read_session(&session, cancelled, kind, purpose)?)
 }

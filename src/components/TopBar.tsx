@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { api } from "../api/backend";
 import { startImport } from "../hooks/useEvents";
 import { useApp } from "../stores/app";
@@ -7,6 +8,11 @@ export function TopBar() {
   const connected = status?.state === "Connected" || status?.state === "Simulator";
   const busy = !!op;
   const changed = workspace?.changed_count ?? 0;
+  const [gate, setGate] = useState<{ passed: boolean; verified_single_slot_sessions: number; required: number } | null>(null);
+  const realHw = status?.state === "Connected";
+  useEffect(() => {
+    if (realHw) void api().hardwareGate().then(setGate).catch(() => setGate(null));
+  }, [realHw, workspace?.baseline?.id]);
 
   const doImport = async () => {
     const files = await api().pickFiles();
@@ -43,6 +49,11 @@ export function TopBar() {
       <button className={`conn ${connected ? "ok" : "off"}`} onClick={() => openDialog({ kind: "connect" })} title={status?.description ?? "Connect"}>
         <span className="dot" aria-hidden /> {stateLabel}
       </button>
+      {realHw && gate && !gate.passed && (
+        <span className="badge warn" title="Until you complete the single-slot write + restore test on a slot you choose, writes to real hardware are limited to one changed slot. See docs/HARDWARE-TESTS.md.">
+          Hardware test {gate.verified_single_slot_sessions}/{gate.required}: single-slot writes only
+        </span>
+      )}
       <div className="spacer" />
       <button onClick={() => void undo()} disabled={!workspace?.can_undo} title={workspace?.undo_label ? `Undo: ${workspace.undo_label} (⌘Z)` : "Undo (⌘Z)"}>
         Undo

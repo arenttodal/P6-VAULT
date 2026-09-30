@@ -61,50 +61,28 @@ impl Vault {
         std::fs::create_dir_all(root.join("backups"))?;
         let conn = Connection::open(root.join("vault.sqlite"))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;")?;
-        let mut v = Self {
-            conn,
-            root: root.to_path_buf(),
-            vault_id: String::new(),
-        };
+        let mut v = Self { conn, root: root.to_path_buf(), vault_id: String::new() };
         v.migrate()?;
-        v.vault_id = v
-            .conn
-            .query_row("SELECT value FROM meta WHERE key='vault_id'", [], |r| {
-                r.get(0)
-            })?;
+        v.vault_id = v.conn.query_row("SELECT value FROM meta WHERE key='vault_id'", [], |r| r.get(0))?;
         Ok(v)
     }
 
     fn migrate(&mut self) -> VResult<()> {
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-        )?;
+        self.conn.execute_batch("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")?;
         let ver: i64 = self
             .conn
-            .query_row(
-                "SELECT value FROM meta WHERE key='schema_version'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| r.get::<_, String>(0))
             .optional()?
             .map(|s| s.parse().unwrap_or(0))
             .unwrap_or(0);
         if ver > SCHEMA_VERSION {
-            return Err(VaultError::Unsupported(format!(
-                "vault schema {ver} is newer than this app ({SCHEMA_VERSION})"
-            )));
+            return Err(VaultError::Unsupported(format!("vault schema {ver} is newer than this app ({SCHEMA_VERSION})")));
         }
         if ver < 1 {
             let tx = self.conn.transaction()?;
             tx.execute_batch(include_str!("schema.sql"))?;
-            tx.execute(
-                "INSERT INTO meta(key,value) VALUES('schema_version','1')",
-                [],
-            )?;
-            tx.execute(
-                "INSERT OR IGNORE INTO meta(key,value) VALUES('vault_id',?1)",
-                [new_id()],
-            )?;
+            tx.execute("INSERT INTO meta(key,value) VALUES('schema_version','1')", [])?;
+            tx.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('vault_id',?1)", [new_id()])?;
             tx.commit()?;
         }
         Ok(())
@@ -124,12 +102,7 @@ impl Vault {
     }
 
     pub fn setting(&self, key: &str) -> VResult<Option<String>> {
-        Ok(self
-            .conn
-            .query_row("SELECT value FROM settings WHERE key=?1", [key], |r| {
-                r.get(0)
-            })
-            .optional()?)
+        Ok(self.conn.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).optional()?)
     }
     pub fn set_setting(&self, key: &str, value: &str) -> VResult<()> {
         self.conn.execute("INSERT INTO settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key, value])?;
@@ -139,17 +112,10 @@ impl Vault {
     pub fn payload(&self, hash: &str) -> VResult<Payload> {
         let b: Vec<u8> = self
             .conn
-            .query_row(
-                "SELECT payload FROM patch_blobs WHERE hash=?1",
-                [hash],
-                |r| r.get(0),
-            )
+            .query_row("SELECT payload FROM patch_blobs WHERE hash=?1", [hash], |r| r.get(0))
             .optional()?
-            .ok_or_else(|| {
-                VaultError::NotFound(format!("patch {}", &hash[..hash.len().min(12)]))
-            })?;
-        let p = Payload::from_slice(&b)
-            .ok_or_else(|| VaultError::Database("stored payload has wrong length".into()))?;
+            .ok_or_else(|| VaultError::NotFound(format!("patch {}", &hash[..hash.len().min(12)])))?;
+        let p = Payload::from_slice(&b).ok_or_else(|| VaultError::Database("stored payload has wrong length".into()))?;
         if p.exact_hash() != hash {
             return Err(VaultError::Database("stored payload hash mismatch".into()));
         }
@@ -158,11 +124,7 @@ impl Vault {
 
     pub fn occurrence_blob(&self, occurrence_id: &str) -> VResult<String> {
         self.conn
-            .query_row(
-                "SELECT blob_hash FROM source_occurrences WHERE id=?1",
-                [occurrence_id],
-                |r| r.get(0),
-            )
+            .query_row("SELECT blob_hash FROM source_occurrences WHERE id=?1", [occurrence_id], |r| r.get(0))
             .optional()?
             .ok_or_else(|| VaultError::NotFound(format!("occurrence {occurrence_id}")))
     }

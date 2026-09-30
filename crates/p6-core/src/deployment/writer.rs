@@ -35,21 +35,12 @@ enum StepResult {
     Stop(String, &'static str),
 }
 
-pub fn execute(
-    dev: &mut Device,
-    vault: &Mutex<Vault>,
-    permit: ConfirmedWritePermit,
-    stop: &AtomicBool,
-    progress: &dyn Fn(Progress),
-) -> DResult<WriteOutcome> {
+pub fn execute(dev: &mut Device, vault: &Mutex<Vault>, permit: ConfirmedWritePermit, stop: &AtomicBool, progress: &dyn Fn(Progress)) -> DResult<WriteOutcome> {
     let plan: FrozenPlan = {
         let mut v = vault.lock().unwrap();
         let s = v.write_session(permit.session_id())?;
         if s.status != "Ready" {
-            return Err(DeployError::InvalidPermit(format!(
-                "session is {}",
-                s.status
-            )));
+            return Err(DeployError::InvalidPermit(format!("session is {}", s.status)));
         }
         let plan = load_plan(&v, permit.session_id())?;
         if plan.hash() != permit.plan_hash() || s.plan_hash != permit.plan_hash() {
@@ -62,15 +53,11 @@ pub fn execute(
             return Err(DeployError::InvalidPermit("New changed".into()));
         }
         // Backup must still exist and match.
-        let bytes = std::fs::read(&plan.backup_syx)
-            .map_err(|e| DeployError::BackupFailed(e.to_string()))?;
+        let bytes = std::fs::read(&plan.backup_syx).map_err(|e| DeployError::BackupFailed(e.to_string()))?;
         if crate::library::import::file_hash(&bytes) != plan.backup_hash {
-            return Err(DeployError::BackupFailed(
-                "backup file no longer matches".into(),
-            ));
+            return Err(DeployError::BackupFailed("backup file no longer matches".into()));
         }
-        v.set_session_status(permit.session_id(), "Writing", None, None)
-            .map_err(|e| DeployError::JournalFailed(e.to_string()))?;
+        v.set_session_status(permit.session_id(), "Writing", None, None).map_err(|e| DeployError::JournalFailed(e.to_string()))?;
         plan
     };
     let sid = plan.session_id.clone();
@@ -84,15 +71,7 @@ pub fn execute(
             break;
         }
         progress(Progress::new("write", i, total, Some(step.slot)));
-        match write_one(
-            dev,
-            vault,
-            &permit,
-            &plan,
-            step.slot,
-            &step.expected_before,
-            &step.desired,
-        ) {
+        match write_one(dev, vault, &permit, &plan, step.slot, &step.expected_before, &step.desired) {
             Ok(StepResult::Verified) => verified += 1,
             Ok(StepResult::Stop(msg, status)) => {
                 stop_err = Some((msg, status));
@@ -107,23 +86,12 @@ pub fn execute(
     progress(Progress::new("write", verified, total, None));
 
     let steps = vault.lock().unwrap().write_steps(&sid)?;
-    let failed = steps
-        .iter()
-        .filter(|s| {
-            matches!(
-                s.state.as_str(),
-                "Failed" | "Uncertain" | "SendIntent" | "SentUnverified"
-            )
-        })
-        .count();
+    let failed = steps.iter().filter(|s| matches!(s.state.as_str(), "Failed" | "Uncertain" | "SendIntent" | "SentUnverified")).count();
     let not_attempted = steps.iter().filter(|s| s.state == "Planned").count();
 
     if let Some((msg, status)) = stop_err {
         let status = if failed > 0 { "NeedsRecovery" } else { status };
-        vault
-            .lock()
-            .unwrap()
-            .set_session_status(&sid, status, Some("stopped"), Some(&msg))?;
+        vault.lock().unwrap().set_session_status(&sid, status, Some("stopped"), Some(&msg))?;
         return Ok(WriteOutcome {
             session_id: sid,
             status: status.into(),
@@ -138,20 +106,9 @@ pub fn execute(
     }
 
     // Final reconciliation: read all 500 and compare with the full frozen target.
-    vault
-        .lock()
-        .unwrap()
-        .set_session_status(&sid, "Reconciling", None, None)?;
+    vault.lock().unwrap().set_session_status(&sid, "Reconciling", None, None)?;
     let never = AtomicBool::new(false);
-    let read = read_bank(
-        dev,
-        vault,
-        None,
-        "post-write verification",
-        "post_write",
-        &never,
-        progress,
-    );
+    let read = read_bank(dev, vault, None, "post-write verification", "post_write", &never, progress);
     let mut v = vault.lock().unwrap();
     let base = WriteOutcome {
         session_id: sid.clone(),
@@ -167,49 +124,21 @@ pub fn execute(
     let snap = match read {
         Ok(r) if r.snapshot_id.is_some() => r.snapshot_id.unwrap(),
         Ok(r) => {
-            let msg = format!(
-                "{verified} writes verified; full-bank verification pending ({} slot(s) unread)",
-                r.missing.len()
-            );
-            v.set_session_status(
-                &sid,
-                "NeedsRecovery",
-                Some("final_read_incomplete"),
-                Some(&msg),
-            )?;
-            return Ok(WriteOutcome {
-                status: "NeedsRecovery".into(),
-                outcome: "final_read_incomplete".into(),
-                first_error: Some(msg),
-                ..base
-            });
+            let msg = format!("{verified} writes verified; full-bank verification pending ({} slot(s) unread)", r.missing.len());
+            v.set_session_status(&sid, "NeedsRecovery", Some("final_read_incomplete"), Some(&msg))?;
+            return Ok(WriteOutcome { status: "NeedsRecovery".into(), outcome: "final_read_incomplete".into(), first_error: Some(msg), ..base });
         }
         Err(e) => {
             let msg = format!("{verified} writes verified; full-bank verification pending ({e})");
-            v.set_session_status(
-                &sid,
-                "NeedsRecovery",
-                Some("final_read_incomplete"),
-                Some(&msg),
-            )?;
-            return Ok(WriteOutcome {
-                status: "NeedsRecovery".into(),
-                outcome: "final_read_incomplete".into(),
-                first_error: Some(msg),
-                ..base
-            });
+            v.set_session_status(&sid, "NeedsRecovery", Some("final_read_incomplete"), Some(&msg))?;
+            return Ok(WriteOutcome { status: "NeedsRecovery".into(), outcome: "final_read_incomplete".into(), first_error: Some(msg), ..base });
         }
     };
     v.set_session_field(&sid, "final_snapshot_id", &snap)?;
     let cells = v.snapshot_cells(&snap)?;
-    let mismatch: Vec<u16> = (0..500u16)
-        .filter(|&i| cells[i as usize].blob_hash != plan.target[i as usize])
-        .collect();
+    let mismatch: Vec<u16> = (0..500u16).filter(|&i| cells[i as usize].blob_hash != plan.target[i as usize]).collect();
     if !mismatch.is_empty() {
-        let msg = format!(
-            "final read disagrees with the target at {} slot(s)",
-            mismatch.len()
-        );
+        let msg = format!("final read disagrees with the target at {} slot(s)", mismatch.len());
         v.set_session_status(&sid, "NeedsRecovery", Some("final_mismatch"), Some(&msg))?;
         return Ok(WriteOutcome {
             status: "NeedsRecovery".into(),
@@ -222,28 +151,11 @@ pub fn execute(
     }
     v.advance_baseline(&plan.workspace_id, &snap)?;
     v.set_session_status(&sid, "Completed", Some("verified"), None)?;
-    Ok(WriteOutcome {
-        status: "Completed".into(),
-        outcome: "verified".into(),
-        final_snapshot_id: Some(snap),
-        ..base
-    })
+    Ok(WriteOutcome { status: "Completed".into(), outcome: "verified".into(), final_snapshot_id: Some(snap), ..base })
 }
 
-fn journal(
-    vault: &Mutex<Vault>,
-    sid: &str,
-    slot: u16,
-    state: &str,
-    bump: bool,
-    readback: Option<&str>,
-    err: Option<&str>,
-) -> DResult<()> {
-    vault
-        .lock()
-        .unwrap()
-        .set_step(sid, slot, state, bump, readback, err)
-        .map_err(|e| DeployError::JournalFailed(e.to_string()))
+fn journal(vault: &Mutex<Vault>, sid: &str, slot: u16, state: &str, bump: bool, readback: Option<&str>, err: Option<&str>) -> DResult<()> {
+    vault.lock().unwrap().set_step(sid, slot, state, bump, readback, err).map_err(|e| DeployError::JournalFailed(e.to_string()))
 }
 
 fn write_one(
@@ -256,8 +168,7 @@ fn write_one(
     desired_hash: &str,
 ) -> DResult<StepResult> {
     let sid = &plan.session_id;
-    let slot = UserSlot::new(slot_n)
-        .ok_or_else(|| DeployError::Invalid(format!("slot {slot_n} is not a user slot")))?;
+    let slot = UserSlot::new(slot_n).ok_or_else(|| DeployError::Invalid(format!("slot {slot_n} is not a user slot")))?;
     let desired: Payload = vault.lock().unwrap().payload(desired_hash)?;
     if desired.exact_hash() != desired_hash {
         return Err(DeployError::Invalid("desired payload hash mismatch".into()));
@@ -271,10 +182,7 @@ fn write_one(
             Err(e) => {
                 let state = if attempt == 0 { "Planned" } else { "Uncertain" };
                 journal(vault, sid, slot_n, state, false, None, Some(&e.to_string()))?;
-                return Ok(StepResult::Stop(
-                    format!("could not read slot {slot} before writing: {e}"),
-                    "Interrupted",
-                ));
+                return Ok(StepResult::Stop(format!("could not read slot {slot} before writing: {e}"), "Interrupted"));
             }
         };
         let oh = observed.exact_hash();
@@ -283,77 +191,27 @@ fn write_one(
             return Ok(StepResult::Verified);
         }
         if oh != expected_before {
-            vault.lock().unwrap().preserve_observation(
-                &format!("Unexpected content at {slot} during write"),
-                slot_n,
-                &observed,
-            )?;
+            vault.lock().unwrap().preserve_observation(&format!("Unexpected content at {slot} during write"), slot_n, &observed)?;
             let state = if attempt == 0 { "Failed" } else { "Uncertain" };
-            journal(
-                vault,
-                sid,
-                slot_n,
-                state,
-                false,
-                Some(&oh),
-                Some("hardware drift: slot changed since backup"),
-            )?;
-            return Ok(StepResult::Stop(
-                format!(
-                    "slot {slot} changed on the synth since the backup; nothing was written there"
-                ),
-                "NeedsRecovery",
-            ));
+            journal(vault, sid, slot_n, state, false, Some(&oh), Some("hardware drift: slot changed since backup"))?;
+            return Ok(StepResult::Stop(format!("slot {slot} changed on the synth since the backup; nothing was written there"), "NeedsRecovery"));
         }
         if attempt >= max_attempts {
-            journal(
-                vault,
-                sid,
-                slot_n,
-                "Failed",
-                false,
-                Some(&oh),
-                Some("write did not take effect after retries"),
-            )?;
-            return Ok(StepResult::Stop(
-                format!("slot {slot} did not accept the write after {attempt} attempt(s)"),
-                "NeedsRecovery",
-            ));
+            journal(vault, sid, slot_n, "Failed", false, Some(&oh), Some("write did not take effect after retries"))?;
+            return Ok(StepResult::Stop(format!("slot {slot} did not accept the write after {attempt} attempt(s)"), "NeedsRecovery"));
         }
         attempt += 1;
         // Durable intent BEFORE the send: a crash after this point is uncertain.
         journal(vault, sid, slot_n, "SendIntent", true, None, None)?;
         if let Err(e) = dev.transmit_stored_program(permit, slot, &desired) {
-            journal(
-                vault,
-                sid,
-                slot_n,
-                "Uncertain",
-                false,
-                None,
-                Some(&e.to_string()),
-            )?;
-            return Ok(StepResult::Stop(
-                format!("send failed at {slot}: {e}"),
-                "NeedsRecovery",
-            ));
+            journal(vault, sid, slot_n, "Uncertain", false, None, Some(&e.to_string()))?;
+            return Ok(StepResult::Stop(format!("send failed at {slot}: {e}"), "NeedsRecovery"));
         }
         journal(vault, sid, slot_n, "SentUnverified", false, None, None)?;
         // Never accept a reply that was buffered before the write.
         if let Err(e) = dev.drain(Duration::from_millis(dev.profile.inter_request_ms.max(20))) {
-            journal(
-                vault,
-                sid,
-                slot_n,
-                "Uncertain",
-                false,
-                None,
-                Some(&e.to_string()),
-            )?;
-            return Ok(StepResult::Stop(
-                format!("connection lost after writing {slot}: {e}"),
-                "NeedsRecovery",
-            ));
+            journal(vault, sid, slot_n, "Uncertain", false, None, Some(&e.to_string()))?;
+            return Ok(StepResult::Stop(format!("connection lost after writing {slot}: {e}"), "NeedsRecovery"));
         }
         match dev.read_program(slot.address(), None) {
             Ok(back) => {
@@ -366,11 +224,7 @@ fn write_one(
                     // Write did not land; loop re-reads and may retry within the plan.
                     continue;
                 }
-                vault.lock().unwrap().preserve_observation(
-                    &format!("Read-back mismatch at {slot}"),
-                    slot_n,
-                    &back,
-                )?;
+                vault.lock().unwrap().preserve_observation(&format!("Read-back mismatch at {slot}"), slot_n, &back)?;
                 let d = back.diff(&desired);
                 journal(
                     vault,
@@ -379,30 +233,13 @@ fn write_one(
                     "Failed",
                     false,
                     Some(&bh),
-                    Some(&format!(
-                        "read-back differs in {} byte(s), first at {:?}",
-                        d.count, d.first_offsets
-                    )),
+                    Some(&format!("read-back differs in {} byte(s), first at {:?}", d.count, d.first_offsets)),
                 )?;
-                return Err(DeployError::VerificationMismatch {
-                    slot: slot_n,
-                    differing: d.count,
-                });
+                return Err(DeployError::VerificationMismatch { slot: slot_n, differing: d.count });
             }
             Err(e) => {
-                journal(
-                    vault,
-                    sid,
-                    slot_n,
-                    "Uncertain",
-                    false,
-                    None,
-                    Some(&e.to_string()),
-                )?;
-                return Ok(StepResult::Stop(
-                    format!("could not verify {slot}: {e}"),
-                    "NeedsRecovery",
-                ));
+                journal(vault, sid, slot_n, "Uncertain", false, None, Some(&e.to_string()))?;
+                return Ok(StepResult::Stop(format!("could not verify {slot}: {e}"), "NeedsRecovery"));
             }
         }
     }

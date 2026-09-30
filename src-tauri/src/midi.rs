@@ -29,16 +29,8 @@ fn looks_like_p6(name: &str) -> bool {
 pub fn list_ports() -> Result<PortList, String> {
     let mi = MidiInput::new("P6 Vault probe").map_err(|e| e.to_string())?;
     let mo = MidiOutput::new("P6 Vault probe").map_err(|e| e.to_string())?;
-    let inputs: Vec<String> = mi
-        .ports()
-        .iter()
-        .filter_map(|p| mi.port_name(p).ok())
-        .collect();
-    let outputs: Vec<String> = mo
-        .ports()
-        .iter()
-        .filter_map(|p| mo.port_name(p).ok())
-        .collect();
+    let inputs: Vec<String> = mi.ports().iter().filter_map(|p| mi.port_name(p).ok()).collect();
+    let outputs: Vec<String> = mo.ports().iter().filter_map(|p| mo.port_name(p).ok()).collect();
     Ok(PortList {
         suggested_input: inputs.iter().find(|n| looks_like_p6(n)).cloned(),
         suggested_output: outputs.iter().find(|n| looks_like_p6(n)).cloned(),
@@ -89,9 +81,7 @@ impl MidirTransport {
                 (),
             )
             .map_err(|e| e.to_string())?;
-        let out = mo
-            .connect(&out_port, "p6-vault-out")
-            .map_err(|e| e.to_string())?;
+        let out = mo.connect(&out_port, "p6-vault-out").map_err(|e| e.to_string())?;
         Ok(Self {
             out,
             _input: input,
@@ -99,11 +89,7 @@ impl MidirTransport {
             overflow,
             asm: FrameAssembler::new(MIDI_MAX_FRAME),
             ready: VecDeque::new(),
-            kind: if din {
-                TransportKind::Din
-            } else {
-                TransportKind::Usb
-            },
+            kind: if din { TransportKind::Din } else { TransportKind::Usb },
             desc: format!("{input_name} / {output_name}"),
         })
     }
@@ -122,9 +108,7 @@ impl MidirTransport {
 
 impl Transport for MidirTransport {
     fn send(&mut self, bytes: &[u8]) -> Result<(), TransportError> {
-        self.out
-            .send(bytes)
-            .map_err(|e| TransportError::Io(e.to_string()))
+        self.out.send(bytes).map_err(|e| TransportError::Io(e.to_string()))
     }
 
     fn recv(&mut self, timeout: Duration) -> Result<Option<RecvEvent>, TransportError> {
@@ -158,7 +142,5 @@ impl Transport for MidirTransport {
 
 /// Is the named endpoint still present? (CoreMIDI removes ports on unplug.)
 pub fn ports_present(input: &str, output: &str) -> bool {
-    list_ports()
-        .map(|p| p.inputs.iter().any(|n| n == input) && p.outputs.iter().any(|n| n == output))
-        .unwrap_or(false)
+    list_ports().map(|p| p.inputs.iter().any(|n| n == input) && p.outputs.iter().any(|n| n == output)).unwrap_or(false)
 }

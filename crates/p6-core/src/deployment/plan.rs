@@ -59,40 +59,28 @@ pub struct Review {
 #[serde(tag = "kind")]
 pub enum PrepareOutcome {
     Ready(Box<Review>),
-    NoChanges {
-        session_id: String,
-        backup: Option<BackupInfo>,
-    },
-    Drift {
-        session_id: String,
-        live_snapshot_id: String,
-        slots: Vec<ReconcileSlot>,
-    },
+    NoChanges { session_id: String, backup: Option<BackupInfo> },
+    Drift { session_id: String, live_snapshot_id: String, slots: Vec<ReconcileSlot> },
 }
 
 /// Prepare a review. Transmits only read requests (05). Never stores.
-pub fn prepare(
-    dev: &mut Device,
-    vault: &Mutex<Vault>,
-    ws: &str,
-    cancel: &AtomicBool,
-    progress: &dyn Fn(Progress),
-) -> DResult<PrepareOutcome> {
+pub fn prepare(dev: &mut Device, vault: &Mutex<Vault>, ws: &str, cancel: &AtomicBool, progress: &dyn Fn(Progress)) -> DResult<PrepareOutcome> {
     let simulator = dev.kind() == TransportKind::Simulator;
     let session_id = crate::util::new_id();
     let (rev, baseline, staged) = {
         let mut v = vault.lock().unwrap();
         let view = v.workspace_view(ws)?;
         if !view.writable_baseline {
-            return Err(DeployError::Invalid(
-                "Current is not a hardware snapshot yet. Sync with the synth and reconcile first."
-                    .into(),
-            ));
+            return Err(DeployError::Invalid("Current is not a hardware snapshot yet. Sync with the synth and reconcile first.".into()));
         }
         if view.empty_count > 0 {
-            return Err(DeployError::Vault(
-                crate::storage::VaultError::IncompleteBank(view.empty_count),
-            ));
+            return Err(DeployError::Vault(crate::storage::VaultError::IncompleteBank(view.empty_count)));
+        }
+        if !simulator {
+            let gate = v.hardware_gate()?;
+            if !gate.passed && view.changed_count != 1 {
+                return Err(DeployError::HardwareGate { done: gate.verified_single_slot_sessions, required: gate.required, changed: view.changed_count });
+            }
         }
         let staged = v.staged_payloads(ws)?;
         if staged.iter().any(|p| p.is_none()) {
@@ -100,23 +88,11 @@ pub fn prepare(
         }
         let baseline = view.baseline.unwrap().id;
         v.checkpoint(ws, "before write review")?;
-        v.create_write_session(
-            &session_id,
-            ws,
-            view.revision,
-            dev.epoch(),
-            &dev.description(),
-            simulator,
-            Some(&baseline),
-            None,
-        )?;
+        v.create_write_session(&session_id, ws, view.revision, dev.epoch(), &dev.description(), simulator, Some(&baseline), None)?;
         (view.revision, baseline, staged)
     };
     let fail = |status: &str, msg: &str| {
-        let _ = vault
-            .lock()
-            .unwrap()
-            .set_session_status(&session_id, status, Some(msg), Some(msg));
+        let _ = vault.lock().unwrap().set_session_status(&session_id, status, Some(msg), Some(msg));
     };
 
     // 1. Fresh complete live snapshot.
@@ -129,9 +105,7 @@ pub fn prepare(
     };
     let Some(live) = read.snapshot_id.clone() else {
         fail("CancelledBeforeWrite", "backup read incomplete");
-        return Err(DeployError::IncompleteBank {
-            missing: read.missing.len(),
-        });
+        return Err(DeployError::IncompleteBank { missing: read.missing.len() });
     };
     let mut v = vault.lock().unwrap();
     v.set_session_field(&session_id, "prewrite_snapshot_id", &live)?;
@@ -139,75 +113,31 @@ pub fn prepare(
     // 2. Drift check against Current.
     let base_cells = v.snapshot_cells(&baseline)?;
     let live_cells = v.snapshot_cells(&live)?;
-    if base_cells
-        .iter()
-        .zip(&live_cells)
-        .any(|(a, b)| a.blob_hash != b.blob_hash)
-    {
+    if base_cells.iter().zip(&live_cells).any(|(a, b)| a.blob_hash != b.blob_hash) {
         let slots = v.reconcile_preview(ws, &live)?;
-        v.set_session_status(
-            &session_id,
-            "CancelledBeforeWrite",
-            Some("hardware drift"),
-            None,
-        )?;
-        return Ok(PrepareOutcome::Drift {
-            session_id,
-            live_snapshot_id: live,
-            slots,
-        });
+        v.set_session_status(&session_id, "CancelledBeforeWrite", Some("hardware drift"), None)?;
+        return Ok(PrepareOutcome::Drift { session_id, live_snapshot_id: live, slots });
     }
 
     // 3. Verified backup.
-    let backup = match write_backup(
-        &v,
-        &session_id,
-        &live,
-        serde_json::to_value(&dev.profile).unwrap(),
-        simulator,
-    ) {
+    let backup = match write_backup(&v, &session_id, &live, serde_json::to_value(&dev.profile).unwrap(), simulator) {
         Ok(b) => b,
         Err(e) => {
-            v.set_session_status(
-                &session_id,
-                "CancelledBeforeWrite",
-                Some("backup failed"),
-                Some(&e.to_string()),
-            )?;
+            v.set_session_status(&session_id, "CancelledBeforeWrite", Some("backup failed"), Some(&e.to_string()))?;
             return Err(e);
         }
     };
-    v.set_session_field(
-        &session_id,
-        "backup_syx_path",
-        &backup.syx_path.to_string_lossy(),
-    )?;
-    v.set_session_field(
-        &session_id,
-        "backup_manifest_path",
-        &backup.manifest_path.to_string_lossy(),
-    )?;
+    v.set_session_field(&session_id, "backup_syx_path", &backup.syx_path.to_string_lossy())?;
+    v.set_session_field(&session_id, "backup_manifest_path", &backup.manifest_path.to_string_lossy())?;
     v.set_session_field(&session_id, "backup_hash", &backup.file_hash)?;
 
     // 4. Diff + freeze.
     let view = v.workspace_view(ws)?;
     if view.revision != rev {
-        v.set_session_status(
-            &session_id,
-            "CancelledBeforeWrite",
-            Some("workspace changed"),
-            None,
-        )?;
-        return Err(DeployError::Vault(
-            crate::storage::VaultError::RevisionConflict {
-                current: view.revision,
-            },
-        ));
+        v.set_session_status(&session_id, "CancelledBeforeWrite", Some("workspace changed"), None)?;
+        return Err(DeployError::Vault(crate::storage::VaultError::RevisionConflict { current: view.revision }));
     }
-    let target: Vec<String> = staged
-        .iter()
-        .map(|p| p.as_ref().unwrap().exact_hash())
-        .collect();
+    let target: Vec<String> = staged.iter().map(|p| p.as_ref().unwrap().exact_hash()).collect();
     let steps: Vec<PlanStep> = view
         .slots
         .iter()
@@ -216,25 +146,13 @@ pub fn prepare(
             slot: s.slot as u16,
             expected_before: live_cells[s.slot].blob_hash.clone(),
             desired: target[s.slot].clone(),
-            before_name: s
-                .current
-                .as_ref()
-                .map(|c| c.name.clone())
-                .unwrap_or_default(),
+            before_name: s.current.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
             desired_name: s.new.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
         })
         .collect();
     if steps.is_empty() {
-        v.set_session_status(
-            &session_id,
-            "CancelledBeforeWrite",
-            Some("no changes"),
-            None,
-        )?;
-        return Ok(PrepareOutcome::NoChanges {
-            session_id,
-            backup: Some(backup),
-        });
+        v.set_session_status(&session_id, "CancelledBeforeWrite", Some("no changes"), None)?;
+        return Ok(PrepareOutcome::NoChanges { session_id, backup: Some(backup) });
     }
     let plan = FrozenPlan {
         session_id: session_id.clone(),
@@ -253,91 +171,47 @@ pub fn prepare(
         created_ms: crate::util::now_ms(),
     };
     let plan_hash = plan.hash();
-    let rows: Vec<(u16, String, String)> = plan
-        .steps
-        .iter()
-        .map(|s| (s.slot, s.expected_before.clone(), s.desired.clone()))
-        .collect();
-    if let Err(e) = v.freeze_plan(
-        &session_id,
-        &serde_json::to_string(&plan).unwrap(),
-        &plan_hash,
-        &rows,
-    ) {
-        let _ = v.set_session_status(
-            &session_id,
-            "CancelledBeforeWrite",
-            Some("journal failed"),
-            Some(&e.to_string()),
-        );
+    let rows: Vec<(u16, String, String)> = plan.steps.iter().map(|s| (s.slot, s.expected_before.clone(), s.desired.clone())).collect();
+    if let Err(e) = v.freeze_plan(&session_id, &serde_json::to_string(&plan).unwrap(), &plan_hash, &rows) {
+        let _ = v.set_session_status(&session_id, "CancelledBeforeWrite", Some("journal failed"), Some(&e.to_string()));
         return Err(DeployError::JournalFailed(e.to_string()));
     }
     let mut per_bank = [0usize; 5];
     for s in &plan.steps {
         per_bank[(s.slot / 100) as usize] += 1;
     }
-    let estimated_ms = dev.profile.estimate_write(plan.steps.len()).as_millis() as u64
-        + dev.profile.estimate_read(500).as_millis() as u64;
-    Ok(PrepareOutcome::Ready(Box::new(Review {
-        plan,
-        plan_hash,
-        per_bank,
-        estimated_ms,
-        transport: format!("{:?}", dev.kind()),
-    })))
+    let estimated_ms = dev.profile.estimate_write(plan.steps.len()).as_millis() as u64 + dev.profile.estimate_read(500).as_millis() as u64;
+    Ok(PrepareOutcome::Ready(Box::new(Review { plan, plan_hash, per_bank, estimated_ms, transport: format!("{:?}", dev.kind()) })))
 }
 
 /// Explicit user confirmation of exactly this plan. Returns the only permit type that can
 /// authorize stored writes.
-pub fn confirm(
-    vault: &Mutex<Vault>,
-    session_id: &str,
-    plan_hash: &str,
-    current_epoch: u64,
-) -> DResult<ConfirmedWritePermit> {
+pub fn confirm(vault: &Mutex<Vault>, session_id: &str, plan_hash: &str, current_epoch: u64) -> DResult<ConfirmedWritePermit> {
     let v = vault.lock().unwrap();
     let s = v.write_session(session_id)?;
     if s.status != "Ready" {
-        return Err(DeployError::InvalidPermit(format!(
-            "session is {}",
-            s.status
-        )));
+        return Err(DeployError::InvalidPermit(format!("session is {}", s.status)));
     }
     let (json, stored_hash) = v.plan_json(session_id)?;
-    let plan: FrozenPlan =
-        serde_json::from_str(&json).map_err(|e| DeployError::InvalidPermit(e.to_string()))?;
+    let plan: FrozenPlan = serde_json::from_str(&json).map_err(|e| DeployError::InvalidPermit(e.to_string()))?;
     if stored_hash != plan_hash || plan.hash() != plan_hash {
         return Err(DeployError::InvalidPermit("plan changed".into()));
     }
     if plan.epoch != current_epoch {
-        return Err(DeployError::InvalidPermit(
-            "the connection changed since review".into(),
-        ));
+        return Err(DeployError::InvalidPermit("the connection changed since review".into()));
     }
     let rev = v.workspace_revision(&plan.workspace_id)?;
     if rev != plan.workspace_revision {
-        return Err(DeployError::InvalidPermit(
-            "New changed since review".into(),
-        ));
+        return Err(DeployError::InvalidPermit("New changed since review".into()));
     }
-    Ok(ConfirmedWritePermit::new(
-        session_id.into(),
-        plan_hash.into(),
-        rev,
-        current_epoch,
-    ))
+    Ok(ConfirmedWritePermit::new(session_id.into(), plan_hash.into(), rev, current_epoch))
 }
 
 pub fn cancel_review(vault: &Mutex<Vault>, session_id: &str) -> DResult<()> {
     let mut v = vault.lock().unwrap();
     let s = v.write_session(session_id)?;
     if s.status == "Ready" || s.status == "Preparing" {
-        v.set_session_status(
-            session_id,
-            "CancelledBeforeWrite",
-            Some("cancelled by user"),
-            None,
-        )?;
+        v.set_session_status(session_id, "CancelledBeforeWrite", Some("cancelled by user"), None)?;
     }
     Ok(())
 }

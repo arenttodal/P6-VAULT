@@ -11,12 +11,7 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        Self {
-            code: code.into(),
-            message: message.into(),
-            action: default_action(code),
-            detail: None,
-        }
+        Self { code: code.into(), message: message.into(), action: default_action(code), detail: None }
     }
 }
 
@@ -33,6 +28,7 @@ fn default_action(code: &str) -> Option<String> {
             "BackupFailed" => "Check free disk space and permissions. No programs were written.",
             "JournalFailed" => "Check free disk space. Writing stopped safely.",
             "SelectionOverflow" => "Choose an earlier start slot.",
+            "HardwareGate" => "Stage exactly one change in a slot you have chosen for testing, write it, then restore it (see docs/HARDWARE-TESTS.md).",
             _ => return None,
         }
         .into(),
@@ -45,9 +41,7 @@ impl From<p6_core::storage::VaultError> for ApiError {
         let code = match &e {
             V::RevisionConflict { .. } => "RevisionConflict",
             V::IncompleteBank(_) => "IncompleteBank",
-            V::Operation(p6_core::workspace::operations::OpError::SelectionOverflow { .. }) => {
-                "SelectionOverflow"
-            }
+            V::Operation(p6_core::workspace::operations::OpError::SelectionOverflow { .. }) => "SelectionOverflow",
             V::Operation(_) => "InvalidDestination",
             V::NotFound(_) => "NotFound",
             V::Unsupported(_) => "UnsupportedFormat",
@@ -75,6 +69,7 @@ impl From<p6_core::deployment::DeployError> for ApiError {
                     D::VerificationMismatch { .. } => "VerificationMismatch",
                     D::InvalidPermit(_) => "InvalidPermit",
                     D::Cancelled => "Cancelled",
+                    D::HardwareGate { .. } => "HardwareGate",
                     _ => "Invalid",
                 };
                 ApiError::new(code, other.to_string())

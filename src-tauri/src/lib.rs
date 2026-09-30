@@ -20,10 +20,7 @@ pub fn run() {
                 }
                 Err(e) => {
                     use tauri_plugin_dialog::DialogExt;
-                    app.dialog()
-                        .message(e.clone())
-                        .title("P6 Vault cannot start")
-                        .blocking_show();
+                    app.dialog().message(e.clone()).title("P6 Vault cannot start").blocking_show();
                     Err(e.into())
                 }
             }
@@ -35,10 +32,7 @@ pub fn run() {
                 if let Some((op, kind)) = busy {
                     if kind == "write" || kind == "prepare" || kind == "sync" || kind == "inspect" {
                         api.prevent_close();
-                        let _ = window.emit(
-                            "close-blocked",
-                            serde_json::json!({"op_id": op, "kind": kind}),
-                        );
+                        let _ = window.emit("close-blocked", serde_json::json!({"op_id": op, "kind": kind}));
                     }
                 }
             }
@@ -98,7 +92,21 @@ pub fn run() {
             commands::get_setting,
             commands::set_setting,
             commands::backups_dir,
+            commands::hardware_gate,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running P6 Vault");
+        .build(tauri::generate_context!())
+        .expect("error while building P6 Vault")
+        .run(|app, event| {
+            // Cmd+Q / app quit: never exit silently in the middle of a hardware operation.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    if let Some(st) = app.try_state::<state::AppState>() {
+                        if let Some((op, kind)) = st.busy.lock().unwrap().clone() {
+                            api.prevent_exit();
+                            let _ = app.emit("close-blocked", serde_json::json!({"op_id": op, "kind": kind}));
+                        }
+                    }
+                }
+            }
+        });
 }

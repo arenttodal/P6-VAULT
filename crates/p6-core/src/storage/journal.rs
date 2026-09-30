@@ -61,7 +61,30 @@ fn session_row(r: &rusqlite::Row) -> rusqlite::Result<WriteSessionRow> {
     })
 }
 
+/// Hardware validation gate (docs/HARDWARE-TESTS.md): until the owner has completed a
+/// verified single-slot write AND a verified single-slot restoration on real hardware,
+/// real (non-simulator) deployments are limited to exactly one changed slot.
+#[derive(Debug, Clone, Serialize)]
+pub struct HardwareGate {
+    pub passed: bool,
+    pub verified_single_slot_sessions: usize,
+    pub required: usize,
+}
+
+pub const GATE_REQUIRED_SESSIONS: usize = 2;
+
 impl Vault {
+    pub fn hardware_gate(&self) -> VResult<HardwareGate> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM write_sessions ws WHERE ws.simulator = 0 AND ws.status = 'Completed' AND ws.outcome = 'verified'
+               AND (SELECT COUNT(*) FROM write_steps st WHERE st.session_id = ws.id) = 1",
+            [],
+            |r| r.get(0),
+        )?;
+        let n = n as usize;
+        Ok(HardwareGate { passed: n >= GATE_REQUIRED_SESSIONS, verified_single_slot_sessions: n, required: GATE_REQUIRED_SESSIONS })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create_write_session(
         &mut self,
@@ -83,13 +106,7 @@ impl Vault {
         Ok(())
     }
 
-    pub(crate) fn set_session_status(
-        &mut self,
-        id: &str,
-        status: &str,
-        outcome: Option<&str>,
-        error: Option<&str>,
-    ) -> VResult<()> {
+    pub(crate) fn set_session_status(&mut self, id: &str, status: &str, outcome: Option<&str>, error: Option<&str>) -> VResult<()> {
         self.conn.execute(
             "UPDATE write_sessions SET status=?2, outcome=COALESCE(?3,outcome), error=COALESCE(?4,error), updated_ms=?5 WHERE id=?1",
             params![id, status, outcome, error, now_ms()],
@@ -98,33 +115,21 @@ impl Vault {
     }
 
     pub(crate) fn set_session_field(&mut self, id: &str, field: &str, value: &str) -> VResult<()> {
-        const ALLOWED: &[&str] = &[
-            "prewrite_snapshot_id",
-            "final_snapshot_id",
-            "backup_syx_path",
-            "backup_manifest_path",
-            "backup_hash",
-        ];
+        const ALLOWED: &[&str] = &["prewrite_snapshot_id", "final_snapshot_id", "backup_syx_path", "backup_manifest_path", "backup_hash"];
         if !ALLOWED.contains(&field) {
             return Err(VaultError::Invalid(format!("field {field}")));
         }
-        self.conn.execute(
-            &format!("UPDATE write_sessions SET {field}=?2, updated_ms=?3 WHERE id=?1"),
-            params![id, value, now_ms()],
-        )?;
+        self.conn.execute(&format!("UPDATE write_sessions SET {field}=?2, updated_ms=?3 WHERE id=?1"), params![id, value, now_ms()])?;
         Ok(())
     }
 
     /// Freeze the plan: store plan JSON + hash and all steps as Planned, status Ready.
-    pub(crate) fn freeze_plan(
-        &mut self,
-        id: &str,
-        plan_json: &str,
-        plan_hash: &str,
-        steps: &[(u16, String, String)],
-    ) -> VResult<()> {
+    pub(crate) fn freeze_plan(&mut self, id: &str, plan_json: &str, plan_hash: &str, steps: &[(u16, String, String)]) -> VResult<()> {
         let tx = self.conn.transaction()?;
-        tx.execute("UPDATE write_sessions SET plan_json=?2, plan_hash=?3, status='Ready', updated_ms=?4 WHERE id=?1", params![id, plan_json, plan_hash, now_ms()])?;
+        tx.execute(
+            "UPDATE write_sessions SET plan_json=?2, plan_hash=?3, status='Ready', updated_ms=?4 WHERE id=?1",
+            params![id, plan_json, plan_hash, now_ms()],
+        )?;
         for (i, (slot, before, desired)) in steps.iter().enumerate() {
             tx.execute(
                 "INSERT INTO write_steps(session_id,slot,ord,expected_before_hash,desired_hash,state,attempts,updated_ms) VALUES(?1,?2,?3,?4,?5,'Planned',0,?6)",
@@ -136,23 +141,11 @@ impl Vault {
     }
 
     pub(crate) fn plan_json(&self, id: &str) -> VResult<(String, String)> {
-        Ok(self.conn.query_row(
-            "SELECT plan_json, plan_hash FROM write_sessions WHERE id=?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?)
+        Ok(self.conn.query_row("SELECT plan_json, plan_hash FROM write_sessions WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?)
     }
 
     /// Record a step transition durably (synchronous=FULL commit).
-    pub(crate) fn set_step(
-        &mut self,
-        id: &str,
-        slot: u16,
-        state: &str,
-        bump_attempt: bool,
-        readback: Option<&str>,
-        error: Option<&str>,
-    ) -> VResult<()> {
+    pub(crate) fn set_step(&mut self, id: &str, slot: u16, state: &str, bump_attempt: bool, readback: Option<&str>, error: Option<&str>) -> VResult<()> {
         let n = self.conn.execute(
             "UPDATE write_steps SET state=?3, attempts=attempts+?4, readback_hash=COALESCE(?5,readback_hash), error=?6, updated_ms=?7 WHERE session_id=?1 AND slot=?2",
             params![id, slot, state, bump_attempt as i64, readback, error, now_ms()],
@@ -164,15 +157,13 @@ impl Vault {
     }
 
     pub fn write_session(&self, id: &str) -> VResult<WriteSessionRow> {
-        Ok(self.conn.query_row(
-            &format!("SELECT {SESSION_COLS} FROM write_sessions WHERE id=?1"),
-            [id],
-            session_row,
-        )?)
+        Ok(self.conn.query_row(&format!("SELECT {SESSION_COLS} FROM write_sessions WHERE id=?1"), [id], session_row)?)
     }
 
     pub fn write_steps(&self, id: &str) -> VResult<Vec<WriteStepRow>> {
-        let mut st = self.conn.prepare("SELECT slot,expected_before_hash,desired_hash,state,attempts,readback_hash,error FROM write_steps WHERE session_id=?1 ORDER BY ord")?;
+        let mut st = self
+            .conn
+            .prepare("SELECT slot,expected_before_hash,desired_hash,state,attempts,readback_hash,error FROM write_steps WHERE session_id=?1 ORDER BY ord")?;
         let rows = st
             .query_map([id], |r| {
                 Ok(WriteStepRow {
@@ -190,9 +181,7 @@ impl Vault {
     }
 
     pub fn list_write_sessions(&self) -> VResult<Vec<WriteSessionRow>> {
-        let mut st = self.conn.prepare(&format!(
-            "SELECT {SESSION_COLS} FROM write_sessions ORDER BY created_ms DESC"
-        ))?;
+        let mut st = self.conn.prepare(&format!("SELECT {SESSION_COLS} FROM write_sessions ORDER BY created_ms DESC"))?;
         let rows = st.query_map([], session_row)?.collect::<Result<_, _>>()?;
         Ok(rows)
     }
@@ -205,21 +194,12 @@ impl Vault {
         for s in &sessions {
             match s.status.as_str() {
                 "Preparing" | "Ready" => {
-                    let sent: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM write_steps WHERE session_id=?1 AND state<>'Planned')", [&s.id], |r| r.get(0))?;
+                    let sent: bool =
+                        self.conn.query_row("SELECT EXISTS(SELECT 1 FROM write_steps WHERE session_id=?1 AND state<>'Planned')", [&s.id], |r| r.get(0))?;
                     if sent {
-                        self.set_session_status(
-                            &s.id,
-                            "Interrupted",
-                            None,
-                            Some("app stopped during session"),
-                        )?;
+                        self.set_session_status(&s.id, "Interrupted", None, Some("app stopped during session"))?;
                     } else {
-                        self.set_session_status(
-                            &s.id,
-                            "CancelledBeforeWrite",
-                            Some("app restarted before confirmation"),
-                            None,
-                        )?;
+                        self.set_session_status(&s.id, "CancelledBeforeWrite", Some("app restarted before confirmation"), None)?;
                     }
                 }
                 "Writing" | "Reconciling" => {
@@ -228,12 +208,7 @@ impl Vault {
                         "UPDATE write_steps SET state='Uncertain', error='app stopped after send intent' WHERE session_id=?1 AND state IN ('SendIntent','SentUnverified')",
                         [&s.id],
                     )?;
-                    self.set_session_status(
-                        &s.id,
-                        "Interrupted",
-                        None,
-                        Some("app stopped during deployment"),
-                    )?;
+                    self.set_session_status(&s.id, "Interrupted", None, Some("app stopped during deployment"))?;
                 }
                 _ => {}
             }
@@ -245,12 +220,7 @@ impl Vault {
         Ok(self
             .list_write_sessions()?
             .into_iter()
-            .filter(|s| {
-                matches!(
-                    s.status.as_str(),
-                    "Interrupted" | "NeedsRecovery" | "Writing" | "Reconciling"
-                )
-            })
+            .filter(|s| matches!(s.status.as_str(), "Interrupted" | "NeedsRecovery" | "Writing" | "Reconciling"))
             .collect())
     }
 
@@ -259,17 +229,7 @@ impl Vault {
         let tx = self.conn.transaction()?;
         let (hash, _) = insert_blob(&tx, p)?;
         let sid = insert_source(&tx, label, "partial_read", None, None, None, None)?;
-        insert_occurrence(
-            &tx,
-            &sid,
-            &hash,
-            0,
-            None,
-            "program",
-            Some(slot),
-            None,
-            false,
-        )?;
+        insert_occurrence(&tx, &sid, &hash, 0, None, "program", Some(slot), None, false)?;
         tx.commit()?;
         Ok(hash)
     }
