@@ -144,3 +144,48 @@ impl Drop for DeviceActor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::TransportProfile;
+    use crate::protocol::payload::synthetic_payload;
+    use crate::simulator::SimulatedP6;
+
+    #[test]
+    fn auditions_are_latest_only_and_blockable() {
+        let sim = SimulatedP6::new();
+        let ctl = sim.control.clone();
+        let st = sim.state.clone();
+        let (tx, rx) = mpsc::channel::<AuditionOutcome>();
+        let tx = std::sync::Mutex::new(tx);
+        let actor = DeviceActor::spawn(Device::new(Box::new(sim), TransportProfile::simulator(), 7), move |o| {
+            let _ = tx.lock().unwrap().send(o);
+        });
+        // Hold the actor busy while auditions arrive (e.g. arrow key held down).
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        actor.submit(move |_| {
+            let _ = gate_rx.recv();
+        });
+        for i in 0..20 {
+            assert!(actor.audition(AuditionRequest { id: i, payload: synthetic_payload(i as u32, &format!("A{i}")), label: format!("A{i}") }, true));
+        }
+        gate_tx.send(()).unwrap();
+        match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            AuditionOutcome::Sent { id, .. } => assert_eq!(id, 19),
+            o => panic!("{o:?}"),
+        }
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err(), "superseded auditions must not be sent");
+        assert_eq!(ctl.lock().unwrap().edit_buffer_loads, 1);
+        assert_eq!(st.lock().unwrap().edit_buffer, synthetic_payload(19, "A19"));
+
+        // Blocked during bank operations: requests refused and pending ones purged.
+        actor.set_audition_blocked(true);
+        assert!(!actor.audition(AuditionRequest { id: 99, payload: synthetic_payload(1, "x"), label: "x".into() }, true));
+        actor.set_audition_blocked(false);
+        // Identical payload without force is coalesced (not re-sent).
+        assert!(actor.audition(AuditionRequest { id: 100, payload: synthetic_payload(19, "A19"), label: "same".into() }, false));
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
+        assert_eq!(ctl.lock().unwrap().edit_buffer_loads, 1);
+    }
+}

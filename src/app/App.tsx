@@ -248,8 +248,12 @@ export function App() {
             <button className={compactTab === "bank" ? "on" : ""} onClick={() => set({ compactTab: "bank", pane: "bank" })}>
               Bank
             </button>
+            <button className={compactTab === "sidebar" ? "on" : ""} onClick={() => set({ compactTab: "sidebar" })}>
+              Sources & history
+            </button>
           </div>
         )}
+        {compact && compactTab === "sidebar" && <Sidebar />}
         {(!compact || compactTab === "library") && <LibraryPane searchRef={searchRef} />}
         {(!compact || compactTab === "bank") && <BankPane />}
       </div>

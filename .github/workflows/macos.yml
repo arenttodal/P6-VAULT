@@ -1,0 +1,45 @@
+name: macOS build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Rust toolchain (pinned by rust-toolchain.toml) + both Mac targets
+        run: |
+          rustup show
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Checks (fmt, clippy, Rust tests incl. CoreMIDI build, typecheck, renderer tests)
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          pnpm typecheck
+          pnpm test
+      - name: Build universal app (Apple Silicon + Intel)
+        run: pnpm tauri build --target universal-apple-darwin
+      - name: Package
+        run: |
+          cd target/universal-apple-darwin/release/bundle
+          ditto -c -k --keepParent "macos/P6 Vault.app" "P6-Vault-macOS-universal.app.zip"
+          ls -la macos dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: P6-Vault-macOS
+          path: |
+            target/universal-apple-darwin/release/bundle/P6-Vault-macOS-universal.app.zip
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

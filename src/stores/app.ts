@@ -63,7 +63,7 @@ interface State {
   toasts: Toast[];
   clipboardCount: number;
   compact: boolean;
-  compactTab: Pane;
+  compactTab: Pane | "sidebar";
 }
 
 interface Actions {

@@ -359,6 +359,16 @@ try {
     const un = await invoke("app_info", {});
     if (un.unfinished_sessions.length !== 0) throw new Error("session still unfinished");
   });
+  await step("compact layout around 900 px uses Library/Bank tabs", async () => {
+    await wd("POST", S("/window/rect"), { width: 900, height: 700 });
+    await sleep(600);
+    await find("//div[contains(@class,'tabs')]//button[normalize-space()='Library']");
+    await shot("17-compact-bank");
+    await click("//div[contains(@class,'tabs')]//button[normalize-space()='Library']");
+    await find("//section[contains(@class,'library')]");
+    await shot("18-compact-library");
+    await wd("POST", S("/window/rect"), { width: 1440, height: 900 });
+  });
 } catch (e) {
   process.exitCode = 1;
 } finally {
