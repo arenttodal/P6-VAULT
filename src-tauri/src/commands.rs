@@ -551,6 +551,7 @@ struct SyncResult {
     workspace_id: Option<String>,
     created_workspace: bool,
     rebased: bool,
+    unchanged: bool,
     reconcile: Vec<p6_core::storage::workspace::ReconcileSlot>,
 }
 
@@ -564,7 +565,7 @@ pub fn sync_start(app: AppHandle, state: State<AppState>, retry_session: Option<
         "sync",
         Box::new(move |dev, vault, cancel, progress| {
             let read = sync::read_bank(dev, &vault, retry_session, "sync", "live", cancel, progress)?;
-            let mut res = SyncResult { read: read.clone(), workspace_id: None, created_workspace: false, rebased: false, reconcile: vec![] };
+            let mut res = SyncResult { read: read.clone(), workspace_id: None, created_workspace: false, rebased: false, unchanged: false, reconcile: vec![] };
             if let Some(snap) = &read.snapshot_id {
                 let mut v = vault.lock().unwrap();
                 match v.active_workspace()? {
@@ -574,6 +575,16 @@ pub fn sync_start(app: AppHandle, state: State<AppState>, retry_session: Option<
                         res.created_workspace = true;
                     }
                     Some(ws) => {
+                        // Synth unchanged since Current: keep the baseline (and the undo history).
+                        if let Some(base) = v.workspace_baseline(&ws)? {
+                            let writable = matches!(v.snapshot(&base)?.kind.as_str(), "live" | "post_write" | "prewrite");
+                            let same = v.snapshot_cells(&base)?.iter().zip(v.snapshot_cells(snap)?.iter()).all(|(a, b)| a.blob_hash == b.blob_hash);
+                            if writable && same {
+                                res.workspace_id = Some(ws);
+                                res.unchanged = true;
+                                return Ok(serde_json::to_value(res).unwrap());
+                            }
+                        }
                         let slots = v.reconcile_preview(&ws, snap)?;
                         let needs_choice = slots.iter().any(|s| {
                             matches!(

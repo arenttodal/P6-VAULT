@@ -25,6 +25,8 @@ async function handleDone(ev: T.OpDone) {
       const r = ev.result as T.SyncResult;
       if (!r.read.snapshot_id) {
         st.openDialog({ kind: "syncPartial", read: r.read });
+      } else if (r.unchanged) {
+        st.toast("success", "The synth still matches Current. Nothing changed.");
       } else if (r.created_workspace) {
         st.toast("success", "Current captured from the synth (500 programs). New is ready to organize.");
       } else if (r.rebased) {

@@ -265,6 +265,7 @@ export interface SyncResult {
   workspace_id: string | null;
   created_workspace: boolean;
   rebased: boolean;
+  unchanged: boolean;
   reconcile: ReconcileSlot[];
 }
 

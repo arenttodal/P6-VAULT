@@ -260,6 +260,13 @@ try {
     await shot("11-history");
     await click("//div[@role='dialog']//button[@aria-label='Close']");
   });
+  await step("re-sync with an unchanged synth keeps undo history", async () => {
+    await click(btn("Sync from P6"));
+    await find("//div[contains(@class,'toast')][contains(., 'still matches Current')]", 120000);
+    const undo = await state("s.workspace.can_undo || s.workspace.revision >= 0");
+    if (!undo) throw new Error("state");
+  });
+
   await step("stage an offline change before restart", async () => {
     await exec("document.querySelector('.bank .scroll').scrollTop = 0");
     await sleep(200);

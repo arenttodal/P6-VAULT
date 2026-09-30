@@ -122,7 +122,11 @@ impl Transport for MidirTransport {
             if let Some(e) = self.ready.pop_front() {
                 return Ok(Some(e));
             }
-            let left = deadline.saturating_duration_since(Instant::now());
+            let now = Instant::now();
+            if now >= deadline && !timeout.is_zero() {
+                return Ok(None);
+            }
+            let left = deadline.saturating_duration_since(now);
             match self.rx.recv_timeout(left) {
                 Ok(b) => self.absorb(&b),
                 Err(RecvTimeoutError::Timeout) => return Ok(None),

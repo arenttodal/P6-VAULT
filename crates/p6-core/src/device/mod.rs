@@ -122,8 +122,12 @@ impl Device {
     pub fn drain(&mut self, settle: Duration) -> Result<usize, DeviceError> {
         let mut n = 0;
         let end = Instant::now() + settle;
-        while self.transport.recv(end.saturating_duration_since(Instant::now()))?.is_some() {
-            n += 1;
+        // Hard time bound: continuous traffic (e.g. someone playing) must not stall a drain.
+        while Instant::now() < end {
+            match self.transport.recv(end.saturating_duration_since(Instant::now()))? {
+                Some(_) => n += 1,
+                None => break,
+            }
         }
         if n > 0 {
             self.quarantined += n as u64;
