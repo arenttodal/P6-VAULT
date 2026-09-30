@@ -8,6 +8,12 @@ A desktop patch manager for the Sequential **Prophet-6**: import old `.syx` arch
 
 > Status: the software is complete and tested against the simulator (unit, integration and end-to-end tests). **It has not yet been tested with a real Prophet-6.** Until you complete the single-slot test in [docs/HARDWARE-TESTS.md](docs/HARDWARE-TESTS.md), writes to real hardware are limited to one changed slot. See [docs/STATUS.md](docs/STATUS.md).
 
+## Get the app
+
+**Option A: download the CI build (quickest).** Every push to this branch builds a universal (Apple Silicon + Intel) app on a GitHub macOS runner, after running all the checks there. Open the repository's **Actions → macOS build**, pick the latest green run, and download the **P6-Vault-macOS** artifact. Unzip it, drag **P6 Vault.app** to Applications, then open it once with **right-click → Open** (it is ad-hoc signed, not notarized, so Gatekeeper asks the first time). If macOS says the app "is damaged", run `xattr -dr com.apple.quarantine "/Applications/P6 Vault.app"` and open it again.
+
+**Option B: build it yourself (below).**
+
 ## Build and launch on your Mac
 
 Requirements: macOS 11+, Xcode Command Line Tools (`xcode-select --install`), Rust (https://rustup.rs; the pinned toolchain in `rust-toolchain.toml` installs itself), Node.js 20+ and pnpm (`npm i -g pnpm`).
@@ -48,7 +54,7 @@ Nothing is uploaded anywhere. Personal patches, databases, logs and backups are 
 | --- | --- |
 | `cargo test --workspace` | 79 Rust tests: codec golden vectors and property tests, streaming parser at every split boundary, decoder offsets (name 107–126, arp 91, seq 93), fingerprints, import/export (589,000-byte bank), all bank-operation semantics including the spec's golden examples, 120-step undo across reopen, reconciliation, and 14 deployment integration tests against the simulator (drift, partial backup, mismatch, retries, stop, disconnect → inspect → restore/continue, crash after send-intent, hardware gate, no command 02 outside the WriteEngine) |
 | `pnpm test` | Renderer logic: selection (range, toggle, select-all, filtering), search/sort/duplicate scoping, typing-target shortcut exclusion |
-| `scripts/run-e2e.sh` | **Linux only.** Drives the real desktop binary through WebKitGTK WebDriver (`tauri-driver`) under Xvfb in Simulator mode, in 19 steps: connect, sync, import with preview, multi-select, drag to bank, undo/redo, Move to…, bulk category, protected audition + A/B, review → write → verify, export, restart persistence, drift reconciliation, and interrupted-write recovery. It needs `webkit2gtk-driver`, `xvfb` and `cargo install tauri-driver`. |
+| `scripts/run-e2e.sh` | **Linux only.** Drives the real desktop binary through WebKitGTK WebDriver (`tauri-driver`) under Xvfb in Simulator mode, in 21 steps: connect, sync, import with preview, multi-select, drag to bank, undo/redo, Move to…, bulk category, protected audition + A/B, review → write → verify, export, restart persistence, drift reconciliation, and interrupted-write recovery. It needs `webkit2gtk-driver`, `xvfb` and `cargo install tauri-driver`. |
 
 `cargo run -p p6-core --example make_fixtures -- fixtures/public` regenerates the synthetic public fixtures. They are clearly labelled `TEST …`, and neither the simulator nor the tests send them to real hardware.
 

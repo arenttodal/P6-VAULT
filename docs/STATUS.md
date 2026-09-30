@@ -1,13 +1,13 @@
 # Status: 30 September 2026
 
-**Summary.** Milestones 1–5 are implemented and tested against the simulator. Milestone 6 is done except for work that needs your Mac and your Prophet-6. The app was built and driven end-to-end on Linux (WebKitGTK) in Simulator mode. The macOS `.app` has **not** been built yet: this environment has no macOS SDK, and a macOS cross-check stopped at C/Objective-C dependencies that need Xcode. Run `./scripts/build-macos.sh` on your Mac. Real-hardware validation is **Not tested** in every row (see HARDWARE-TESTS.md). Nothing in this document claims hardware verification.
+**Summary.** Milestones 1–5 are implemented and tested against the simulator. Milestone 6 is done except for work that needs your Mac and your Prophet-6. The app was built and driven end-to-end on Linux (WebKitGTK) in Simulator mode. The macOS build runs in GitHub Actions (`.github/workflows/macos.yml`, macos-14 runner): fmt, clippy, all Rust tests (including the CoreMIDI build) and the renderer tests pass on macOS, and the job produces a universal `.app` + `.dmg` artifact. The app has not yet been launched from Finder on a real Mac (HARDWARE-TESTS step 9). Real-hardware validation is **Not tested** in every row (see HARDWARE-TESTS.md). Nothing in this document claims hardware verification.
 
 Legend: ✅ implemented + automated test · 🟡 implemented, only partly tested or needs hardware/macOS confirmation · ⛔ not implemented
 
 ## Automated evidence
-- `cargo test --workspace`: 64 unit + 14 deployment integration tests (+ 1 perf test). Clippy clean with `-D warnings`.
+- `cargo test --workspace`: 65 unit tests (including a 10k-row performance test and the latest-only audition actor test) + 14 deployment integration tests. Clippy clean with `-D warnings`.
 - `pnpm test`: 10 renderer tests. `pnpm typecheck` passes, and so does the production build.
-- `scripts/run-e2e.sh`: 19/19 steps pass against the real Tauri binary (Linux/WebKitGTK, Simulator mode).
+- `scripts/run-e2e.sh`: 21/21 steps pass against the real Tauri binary (Linux/WebKitGTK, Simulator mode).
 - Performance: listing 10,000 library occurrences takes 122 ms (release build, Linux container). Not yet measured on your Mac.
 
 ## Features
@@ -49,7 +49,7 @@ Legend: ✅ implemented + automated test · 🟡 implemented, only partly tested
 | Legacy | "Prepare compatible version" (derived payloads) | ⛔ | needs hardware evidence; exact verification stops safely if the firmware converts |
 | Diagnostics | MIDI log (no payload bytes), simulator fault controls | ✅ | Diagnostics dialog |
 | | Local log export | ⛔ | view only |
-| Delivery | macOS `.app` + dmg | 🟡 | `scripts/build-macos.sh`; to be run on your Mac |
+| Delivery | macOS `.app` + dmg | 🟡 | CI artifact (universal, ad-hoc signed, not notarized) or `scripts/build-macos.sh`; Finder launch to be confirmed |
 | | README, PROTOCOL, HARDWARE-TESTS, USER-GUIDE, STATUS | ✅ | `docs/` |
 
 ## Deviations from the spec (deliberate)
