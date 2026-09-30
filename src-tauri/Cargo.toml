@@ -1,0 +1,24 @@
+[package]
+name = "p6-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "P6 Vault - Prophet-6 patch manager"
+
+[lib]
+name = "p6_vault_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+p6-core = { path = "../crates/p6-core" }
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+midir = "0.10"
+fs2 = "0.4"

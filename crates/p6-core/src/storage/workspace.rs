@@ -960,9 +960,18 @@ impl Vault {
     /// Three-way comparison against a fresh complete live snapshot.
     pub fn reconcile_preview(&self, ws: &str, live_snapshot: &str) -> VResult<Vec<ReconcileSlot>> {
         let bank = self.load_bank(ws)?;
+        // Only a hardware-derived baseline is a trustworthy "O". With an imported or missing
+        // baseline, every slot where New differs from the synth is an explicit choice.
         let base = match self.workspace_baseline(ws)? {
-            Some(b) => Some(self.snapshot_cells(&b)?),
-            None => None,
+            Some(b)
+                if matches!(
+                    self.snapshot(&b)?.kind.as_str(),
+                    "live" | "post_write" | "prewrite"
+                ) =>
+            {
+                Some(self.snapshot_cells(&b)?)
+            }
+            _ => None,
         };
         let live = self.snapshot_cells(live_snapshot)?;
         let infos = self.cell_infos(
@@ -985,7 +994,7 @@ impl Vault {
             let s = bank[i].as_ref().map(|e| e.blob_hash.as_str());
             let h = live[i].blob_hash.as_str();
             let r = resolve(o, s, h);
-            let trivially_same = o == Some(h) && s == Some(h);
+            let trivially_same = s == Some(h) && o.is_none_or(|o| o == h);
             if trivially_same {
                 continue;
             }
@@ -1387,5 +1396,37 @@ mod tests {
         assert_eq!(view.empty_count, 490);
         assert!(view.baseline.is_none());
         assert!(v.apply_op(&ws, 0, &WorkspaceOp::ResetToBaseline).is_err());
+    }
+
+    #[test]
+    fn imported_baseline_rebase_requires_explicit_choices() {
+        let (_d, mut v, ws, _) = setup();
+        // A "live" read where only slot 7 differs from the imported archive.
+        let s = v.begin_read_session("sync", "sim", 1).unwrap();
+        for i in 0..500u16 {
+            let p = if i == 7 {
+                synthetic_payload(9999, "Live 7")
+            } else {
+                synthetic_payload(i as u32, &format!("Prog {i:03}"))
+            };
+            v.record_read_slot(&s, i, &p).unwrap();
+        }
+        let live = v
+            .finish_read_session(&s, false, "live", "t")
+            .unwrap()
+            .snapshot_id
+            .unwrap();
+        let pv = v.reconcile_preview(&ws, &live).unwrap();
+        assert_eq!(pv.len(), 1);
+        assert_eq!(pv[0].slot, 7);
+        assert_eq!(pv[0].resolution, SlotResolution::Conflict);
+        let mut ch = HashMap::new();
+        ch.insert(7, ConflictChoice::KeepNew);
+        v.apply_rebase(&ws, 0, &live, &ch).unwrap();
+        let view = v.workspace_view(&ws).unwrap();
+        assert!(view.writable_baseline);
+        assert_eq!(view.changed_count, 1);
+        assert_eq!(view.slots[7].new.as_ref().unwrap().name, "Prog 007");
+        assert!(!view.can_undo, "new history branch after rebase");
     }
 }
