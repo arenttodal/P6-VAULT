@@ -1,0 +1,107 @@
+/* Visual tokens and component recipes. Map the example .p6-* selectors to
+   the EXISTING components. Do not create a new layout to use this file.
+   No widths, heights, grid/flex rules, margins, padding, or positioning here. */
+:root {
+  color-scheme: dark;
+  --p6-bg: #0a0b10;
+  --p6-sidebar: #0b0c10;
+  --p6-chrome: #0c0e12;
+  --p6-header: #12121a;
+  --p6-control: #0c0c11;
+  --p6-control-hover: #18191f;
+  --p6-selected: #1d1e24;
+  --p6-divider: #1b1c23;
+  --p6-border-hover: #34353e;
+  --p6-text: #f1f1f3;
+  --p6-text-secondary: #b0b0b8;
+  --p6-text-muted: #92939f;
+  --p6-text-disabled: #70717c;
+  --p6-primary: #4a4441;
+  --p6-primary-hover: #59514d;
+  --p6-primary-border: #655b55;
+  --p6-focus: #7c9cda;
+  --p6-success: #67b88a;
+  --p6-warning: #ceae73;
+  --p6-danger: #ee777d;
+  --p6-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --p6-radius-control: 6px;
+  --p6-radius-pill: 999px;
+}
+
+/* Preserve existing font sizes/line heights by default to protect geometry.
+   Apply the guide's optional type scale only after checking layout parity. */
+.p6-app { background: var(--p6-bg); color: var(--p6-text); font-family: var(--p6-font); }
+.p6-sidebar { background: var(--p6-sidebar); border-color: var(--p6-divider); }
+.p6-toolbar, .p6-audition-bar { background: var(--p6-chrome); border-color: var(--p6-divider); }
+.p6-panel { background: var(--p6-bg); border-color: var(--p6-divider); }
+.p6-pane-title { color: var(--p6-text); font-weight: 600; }
+.p6-section-title { color: var(--p6-text-muted); font-weight: 600; letter-spacing: .06em; }
+.p6-secondary { color: var(--p6-text-secondary); }
+.p6-muted, .p6-empty-state { color: var(--p6-text-muted); }
+.p6-address, .p6-count { font-variant-numeric: tabular-nums; }
+.p6-count { background: #25262b; color: #b6b6bd; border-radius: var(--p6-radius-pill); }
+
+.p6-button {
+  background: var(--p6-control);
+  color: var(--p6-text-secondary);
+  border-color: var(--p6-divider);
+  border-radius: var(--p6-radius-control);
+  box-shadow: none;
+  font-family: inherit;
+  font-weight: 500;
+}
+.p6-button:not(:disabled):not([aria-disabled="true"]):hover {
+  background: var(--p6-control-hover);
+  color: var(--p6-text);
+  border-color: var(--p6-border-hover);
+}
+.p6-button:not(:disabled):not([aria-disabled="true"]):active { background: var(--p6-selected); }
+.p6-button-primary { background: var(--p6-primary); border-color: var(--p6-primary-border); color: #fff; }
+.p6-button-primary:not(:disabled):not([aria-disabled="true"]):hover {
+  background: var(--p6-primary-hover); border-color: #776b63; color: #fff;
+}
+.p6-button[aria-pressed="true"] { background: #302b29; color: var(--p6-text); border-color: #514944; }
+.p6-button:disabled, .p6-button[aria-disabled="true"] {
+  background: #101116; color: var(--p6-text-disabled); border-color: #1c1d24; box-shadow: none;
+}
+.p6-button-primary:disabled, .p6-button-primary[aria-disabled="true"] {
+  background: #272320; color: #928881; border-color: #3b332e;
+}
+
+.p6-input, .p6-select {
+  background: var(--p6-control);
+  color: var(--p6-text-secondary);
+  border-color: var(--p6-divider);
+  border-radius: var(--p6-radius-control);
+  box-shadow: none;
+  font-family: inherit;
+}
+.p6-input::placeholder { color: var(--p6-text-muted); opacity: 1; }
+.p6-input:hover, .p6-select:hover { border-color: var(--p6-border-hover); }
+.p6-input:disabled, .p6-select:disabled { color: var(--p6-text-disabled); }
+.p6-button:focus-visible, .p6-input:focus-visible, .p6-select:focus-visible,
+.p6-nav-item:focus-visible, .p6-row:focus-visible {
+  outline: 2px solid var(--p6-focus); outline-offset: 2px;
+}
+
+.p6-nav-item { color: var(--p6-text-secondary); }
+.p6-nav-item:hover { background: #13141a; color: var(--p6-text); }
+.p6-nav-item[aria-current]:not([aria-current="false"]), .p6-nav-item.is-selected { background: var(--p6-selected); color: var(--p6-text); }
+.p6-table-header { background: var(--p6-header); color: var(--p6-text-muted); border-color: var(--p6-divider); }
+.p6-row { background: var(--p6-bg); color: var(--p6-text); border-color: var(--p6-divider); }
+.p6-row:hover { background: #13141a; }
+.p6-row[aria-selected="true"] { background: var(--p6-selected); }
+.p6-patch-name { color: var(--p6-text); font-weight: 500; }
+.p6-category { border-radius: var(--p6-radius-pill); font-weight: 500; }
+.p6-category[data-category="bass"] { color: #c2987b; background: #231b17; }
+.p6-category[data-category="lead"] { color: #c6ae73; background: #231f15; }
+.p6-category[data-category="pad"] { color: #829fca; background: #171d29; }
+.p6-category[data-category="keys"] { color: #83b596; background: #16231b; }
+.p6-category[data-category="pluck"] { color: #c18aa8; background: #251925; }
+.p6-category[data-category="arp-sequence"] { color: #aa98d4; background: #201a2d; }
+.p6-category[data-category="fx-texture"] { color: #73b7bb; background: #142427; }
+.p6-category[data-category="other"] { color: #a0a1ad; background: #1c1d24; }
+.p6-connected, .p6-verified { color: var(--p6-success); }
+.p6-changed, .p6-uncertain { color: var(--p6-warning); }
+.p6-error { color: var(--p6-danger); }
+.p6-panic:not(:disabled):hover { color: var(--p6-danger); border-color: #593038; }

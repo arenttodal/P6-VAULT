@@ -49,10 +49,10 @@ export function BottomBar() {
         )}
       </div>
       <div className="audition">
-        <button disabled={!connected || blocked || !focusSlot?.current} onClick={a} title="Load Current (A) into the edit buffer (A)">
+        <button aria-pressed={requested?.which === "A"} disabled={!connected || blocked || !focusSlot?.current} onClick={a} title="Load Current (A) into the edit buffer (A)">
           A · Current
         </button>
-        <button disabled={!connected || blocked || !focusSlot?.new || !!same} onClick={b} title={focusSlot && !focusSlot.new ? "Slot is empty" : "Load New (B) into the edit buffer (B)"}>
+        <button aria-pressed={requested?.which === "B"} disabled={!connected || blocked || !focusSlot?.new || !!same} onClick={b} title={focusSlot && !focusSlot.new ? "Slot is empty" : "Load New (B) into the edit buffer (B)"}>
           B · New
         </button>
         <button
@@ -88,6 +88,7 @@ export function BottomBar() {
           ))}
         </select>
         <button
+          className="panic"
           disabled={!connected}
           onClick={() =>
             void api()

@@ -68,3 +68,6 @@ Legend: ✅ implemented + automated test · 🟡 implemented, only partly tested
 | 4 Group workflow | Group ops + restart persistence | ✅ |
 | 5 Deployment | Fault tests pass; physical one-slot gate ready | ✅ / hardware pending |
 | 6 Product | Finder-launchable app; validation matrix | 🟡 build on your Mac; matrix in HARDWARE-TESTS.md |
+
+## Visual pass (1 October 2026)
+Theme tokens from `docs/P6-Vault-Theme.css` are applied in `src/styles/app.css`. The pass touched only colors, weights, borders, radii, the state styling and the dark native window theme. The e2e geometry probe (`GEOM_OUT=… scripts/run-e2e.sh`) compared the bounding boxes of ~100 panes, buttons, selects, inputs, sidebar items, headers and rows in four states (synced, library selection, review dialog, 900 px compact) before and after. They are identical, except that category pills now size to their text within their unchanged cells. Selects use a custom chevron, with padding calibrated to the native width under WebKitGTK; on macOS, check that the search field and Panic button didn't move compared with the earlier build.

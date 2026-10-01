@@ -51,6 +51,23 @@ async function shot(name) {
   const b64 = await wd("GET", S("/screenshot"));
   fs.writeFileSync(path.join(shots, `${name}.png`), Buffer.from(b64, "base64"));
 }
+// Geometry probe for visual passes: bounding boxes of chrome, controls and rows.
+async function geom(label) {
+  const out = process.env.GEOM_OUT;
+  if (!out) return;
+  const g = await exec(`
+    const pick = (sel, n) => [...document.querySelectorAll(sel)].slice(0, n ?? 400).map((e, i) => {
+      const r = e.getBoundingClientRect();
+      return [sel + '#' + i + ' ' + (e.textContent || e.getAttribute('placeholder') || '').trim().slice(0, 24), Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
+    });
+    return [].concat(
+      pick('.topbar, .sidebar, .pane, .bottombar, .table-head, .scroll, .pane-head, .pane-tools'),
+      pick('button'), pick('select'), pick('input'),
+      pick('.sidebar li', 40), pick('.library .row', 8), pick('.bank .row', 8), pick('.table-head > span'), pick('.cat', 12)
+    );`);
+  fs.mkdirSync(out, { recursive: true });
+  fs.writeFileSync(path.join(out, `${label}.json`), JSON.stringify(g, null, 0));
+}
 async function state(expr) {
   return exec(`const s = window.__P6_TEST__.state(); return (${expr});`);
 }
@@ -112,6 +129,7 @@ try {
     await click(btn("Sync from P6"));
     await waitFor("s.workspace && s.workspace.baseline && s.workspace.baseline.kind === 'live' && !s.op", 120000, "sync");
     await shot("02-synced");
+    await geom("02-synced");
   });
 
   await step("import two archives with preview", async () => {
@@ -141,6 +159,7 @@ try {
     await wd("DELETE", S("/actions"));
     await waitFor("s.libSel.ids.size === 5", 5000, "5 selected");
     await shot("05-library-selected");
+    await geom("05-library-selected");
   });
 
   await step("drag 5 library sounds onto bank slot 010 (replace)", async () => {
@@ -228,6 +247,7 @@ try {
     await click(btn(`Review ${n} change`));
     await find("//h2[contains(., 'to the Prophet-6')]", 60000);
     await shot("09-review");
+    await geom("09-review");
     await click("//div[@role='dialog']//button[contains(., 'Write ') and contains(@class,'danger')]");
     await find("//h2[contains(., 'Bank written and verified')]", 120000);
     await shot("10-written");
@@ -371,6 +391,7 @@ try {
     await sleep(600);
     await find("//div[contains(@class,'tabs')]//button[normalize-space()='Library']");
     await shot("17-compact-bank");
+    await geom("17-compact-bank");
     await click("//div[contains(@class,'tabs')]//button[normalize-space()='Library']");
     await find("//section[contains(@class,'library')]");
     await shot("18-compact-library");
